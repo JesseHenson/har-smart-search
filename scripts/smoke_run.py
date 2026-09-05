@@ -11,6 +11,7 @@ import sys
 
 sys.path.insert(0, "src")
 
+from har_search import config
 from har_search.core.models import Criteria
 from har_search.pipeline import run_search
 from har_search.sources.apify_memo23 import ApifyMemo23Source
@@ -22,7 +23,12 @@ def main() -> None:
     if not token:
         raise SystemExit("Set HAR_APIFY_TOKEN first.")
 
-    db = Database("smoke.db")
+    # Write to the same database the MCP server reads (config.database_path(),
+    # not a file in the working directory), and let `run_search` derive the
+    # saved_search key from the criteria itself rather than passing a
+    # hardcoded override. A script that skips the tool's own default is
+    # exactly the kind of gap that leaves `whats_new` nothing to diff.
+    db = Database(config.database_path())
     db.init_schema()
 
     criteria = Criteria(
@@ -37,10 +43,11 @@ def main() -> None:
         source=ApifyMemo23Source(token=token),
         db=db,
         criteria=criteria,
-        saved_search="spring-investment",
         limit=25,
     )
 
+    print(f"saved_search key: {result.saved_search}")
+    print("Pass this exact key to `whats_new` to diff against the next run.")
     print(f"snapshot {result.snapshot_id}: {len(result.scored)} results")
     print(f"excluded: {result.exclusions}, dropped by must: {result.dropped_by_must}")
     for scored in result.scored[:10]:
