@@ -64,3 +64,37 @@ def test_default_weights_make_location_and_budget_heaviest():
     assert DEFAULT_WEIGHTS["max_price"] == 3.0
     assert DEFAULT_WEIGHTS["beds"] == 2.0
     assert max(DEFAULT_WEIGHTS.values()) == 3.0
+
+
+# Regression tests for the degenerate paths of the primitives. These pin the
+# CURRENT behaviour of a "defensive default" (never treat unknown-as-0 in the
+# aggregator itself) so a future change to these primitives can't silently
+# alter that default without a test failing. See scoring.py docstrings on
+# geo_score and categorical_score for the contract these defaults sit inside.
+
+
+def test_ceiling_score_with_zero_ceiling_is_zero():
+    assert ceiling_score(100, 0) == 0.0
+
+
+def test_ceiling_score_with_negative_ceiling_is_zero():
+    assert ceiling_score(100, -50) == 0.0
+
+
+def test_target_score_with_zero_tau_is_exact_match_only():
+    assert target_score(3, 3, 0.0, 0.0) == 1.0
+    assert target_score(4, 3, 0.0, 0.0) == 0.0
+    assert target_score(2, 3, 0.0, 0.0) == 0.0
+
+
+def test_geo_score_unknown_location_defaults_to_zero():
+    """geo_score(False, None) returns 0.0 as a defensive default — callers
+    must branch on unknown location themselves rather than rely on this."""
+    assert geo_score(subdivision_match=False, miles=None) == 0.0
+
+
+def test_categorical_score_unknown_type_defaults_to_zero():
+    """categorical_score(None, wanted) returns 0.0 as a defensive default —
+    callers must branch on unknown property type themselves rather than
+    rely on this."""
+    assert categorical_score(None, [PropertyType.DUPLEX]) == 0.0
