@@ -105,3 +105,40 @@ def test_subject_itself_is_never_its_own_comp():
     ]
     comps, _ = select_comps(SUBJECT, sales=[], active=active, today=TODAY)
     assert all(c.id != "S1" for c in comps)
+
+
+def test_fallback_returns_widest_non_empty_result_when_no_tier_reaches_target():
+    # Construct a cascade where each tier matches fewer than TARGET_COMPS (5):
+    # - Tier 1 (subdivision): 0 matches (no same-subdivision sales)
+    # - Tier 2 (one_mile, 180 days): 2 matches (M0, M1 within 1 mile, recent)
+    # - Tier 3 (two_miles, 365 days): 4 matches (M0, M1 from tier 2 + M2, M3 within 2 miles but older)
+    # - Tier 4 (active): 0 matches (no active listings)
+    # Expected: Returns the widest (4 comps) from tier 3, with basis="sold", without reaching TARGET_COMPS (5)
+    sales = [
+        make_sale("M0", subdivision="Other", lon=-95.37, days_ago=30),  # ~0.6 miles, 30 days → matches tier 2+
+        make_sale("M1", subdivision="Other", lon=-95.37, days_ago=30),  # ~0.6 miles, 30 days → matches tier 2+
+        make_sale("M2", subdivision="Other", lon=-95.36, days_ago=200),  # ~1.2 miles, 200 days → matches tier 3 only (outside tier 2's 180-day limit)
+        make_sale("M3", subdivision="Other", lon=-95.36, days_ago=200),  # ~1.2 miles, 200 days → matches tier 3 only
+    ]
+
+    comps, basis = select_comps(SUBJECT, sales, active=[], today=TODAY)
+
+    # Should return tier 3's widest non-empty result (4 comps), without reaching TARGET_COMPS
+    assert len(comps) == 4, f"Expected 4 comps from tier 3 fallback, got {len(comps)}"
+    assert basis == "sold", f"Expected basis 'sold', got '{basis}'"
+    # Verify these are all the tier 3 matches
+    assert all(c.id in ["M0", "M1", "M2", "M3"] for c in comps)
+
+
+def test_fallback_returns_none_basis_when_no_tier_matches_anything():
+    # All sales fail to match any tier due to property type mismatch
+    sales = [
+        make_sale(f"M{i}", property_type=PropertyType.DUPLEX)
+        for i in range(6)
+    ]
+
+    comps, basis = select_comps(SUBJECT, sales, active=[], today=TODAY)
+
+    # Should return empty comps with "none" basis (no tier produced a result)
+    assert comps == []
+    assert basis == "none", f"Expected basis 'none' for empty result, got '{basis}'"
