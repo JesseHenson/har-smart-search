@@ -1,7 +1,9 @@
+import asyncio
 import json
 from pathlib import Path
 
 MANIFEST = Path(__file__).parent.parent / "manifest.json"
+REPO_ROOT = MANIFEST.parent
 
 
 def test_manifest_is_valid_json_with_required_keys():
@@ -23,3 +25,34 @@ def test_token_is_passed_to_the_server_as_an_env_var():
     env = data["server"]["mcp_config"]["env"]
     assert env["HAR_APIFY_TOKEN"] == "${user_config.apify_token}"
     assert env["HAR_DASHBOARD_PORT"] == "${user_config.dashboard_port}"
+
+
+def test_entry_point_file_exists():
+    """Entry point file must exist on disk relative to repository root."""
+    data = json.loads(MANIFEST.read_text())
+    entry_point = data["server"]["entry_point"]
+
+    # Verify suffix as a sanity check.
+    assert entry_point.endswith("server/__main__.py")
+
+    # Resolve relative to repository root and check it exists.
+    path = REPO_ROOT / entry_point
+    assert path.is_file(), f"Entry point not found: {path}"
+
+
+def test_declared_tools_match_server_tools():
+    """Manifest tools list must match tools the server actually registers."""
+    data = json.loads(MANIFEST.read_text())
+    declared_names = sorted(tool["name"] for tool in data["tools"])
+
+    # Import the server module and list its registered tools.
+    # This works without environment setup because database and HTTP client
+    # are constructed inside tool bodies, not at import time.
+    from har_search.server.__main__ import mcp
+
+    registered_names = sorted(t.name for t in asyncio.run(mcp.list_tools()))
+
+    assert declared_names == registered_names, (
+        f"Tool mismatch: manifest declares {declared_names} "
+        f"but server registers {registered_names}"
+    )
