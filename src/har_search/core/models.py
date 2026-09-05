@@ -96,6 +96,7 @@ class Sale:
     year_built: int | None = None
     lot_sqft: int | None = None
     property_type: PropertyType | None = None
+    flags: tuple[str, ...] = ()
 
 
 @dataclass
@@ -180,4 +181,18 @@ class ListingChange:
 @dataclass(frozen=True)
 class NormalizeResult:
     listing: Listing | None
+    exclusion: str | None = None
+
+
+@dataclass(frozen=True)
+class NormalizeSaleResult:
+    """`NormalizeResult`'s shape for sold rows.
+
+    Sold rows are excluded for the same reasons for-sale rows are, and the
+    reason matters just as much: six leases arriving inside a *sold* query is
+    the most dangerous data defect in this domain, and a bare `None` return
+    cannot say so.
+    """
+
+    sale: Sale | None
     exclusion: str | None = None

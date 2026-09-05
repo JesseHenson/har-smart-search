@@ -126,7 +126,9 @@ def test_normalize_sale_reads_sold_fields():
         "propertyType": "Single-Family",
         "status": "Sold",
     }
-    sale = normalize_sale(raw)
+    result = normalize_sale(raw)
+    assert result.exclusion is None
+    sale = result.sale
     assert sale.sold_price == 460_000
     assert sale.list_price == 470_000
     assert sale.sold_date == date(2026, 8, 27)
@@ -141,7 +143,9 @@ def test_normalize_sale_rejects_rentals():
         "status": "Rented",
         "propertyType": "Single Family",
     }
-    assert normalize_sale(raw) is None
+    result = normalize_sale(raw)
+    assert result.sale is None
+    assert result.exclusion == "lease"
 
 
 def test_normalize_sale_rejects_sold_price_below_floor():
@@ -156,7 +160,9 @@ def test_normalize_sale_rejects_sold_price_below_floor():
         "propertyType": "Single-Family",
         "status": "Sold",
     }
-    assert normalize_sale(raw) is None
+    result = normalize_sale(raw)
+    assert result.sale is None
+    assert result.exclusion == "price_below_floor"
 
 
 def test_parse_date_handles_integer_input():
@@ -171,7 +177,9 @@ def test_parse_date_handles_integer_input():
         "propertyType": "Single-Family",
         "status": "Sold",
     }
-    assert normalize_sale(raw) is None
+    result = normalize_sale(raw)
+    assert result.sale is None
+    assert result.exclusion == "missing_sold_date"
 
 
 def test_negative_beds_normalizes_to_none():
@@ -193,3 +201,61 @@ def test_zero_days_on_market_is_preserved():
     row = dict(GOOD_ROW, daysOnMarket=0)
     listing = normalize_listing(row).listing
     assert listing.days_on_market == 0
+
+
+def test_sold_record_with_implausible_beds_is_nulled_and_flagged():
+    """2322 Shadow Glen — 10 beds on 4,507 sqft — arrives as a SOLD record.
+
+    The guard used to live only in `normalize_listing`, so the spec's own named
+    bad row reached `comps.py` intact and skewed the bedroom-adjustment median
+    by up to the full +/-9% cap in the wrong direction.
+    """
+    raw = {
+        "mlsNumber": "66666666",
+        "address": "2322 Shadow Glen",
+        "city": "Spring",
+        "subdivision": "Spring Forest",
+        "soldPrice": 400_000,
+        "soldDate": "2026-08-11",
+        "sqft": 4507,
+        "beds": 10,
+        "bathsFull": 5,
+        "propertyType": "Single-Family",
+        "status": "Sold",
+    }
+    sale = normalize_sale(raw).sale
+    assert sale is not None
+    assert sale.beds is None
+    assert "suspect_beds" in sale.flags
+    # Everything else on the row is real data and must survive untouched.
+    assert sale.sqft == 4507
+    assert sale.baths_full == 5
+    assert sale.sold_price == 400_000
+
+
+def test_plausible_sold_bed_count_is_left_alone_and_unflagged():
+    """The guard must not fire on a large house that genuinely has the rooms."""
+    raw = {
+        "mlsNumber": "77777777",
+        "soldPrice": 900_000,
+        "soldDate": "2026-08-11",
+        "sqft": 6200,
+        "beds": 9,
+        "propertyType": "Single-Family",
+        "status": "Sold",
+    }
+    sale = normalize_sale(raw).sale
+    assert sale.beds == 9
+    assert sale.flags == ()
+
+
+def test_sold_row_missing_a_price_is_excluded_with_its_own_reason():
+    raw = {
+        "mlsNumber": "88888888",
+        "soldDate": "2026-08-11",
+        "propertyType": "Single-Family",
+        "status": "Sold",
+    }
+    result = normalize_sale(raw)
+    assert result.sale is None
+    assert result.exclusion == "missing_sold_price"

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from har_search.core.labels import param_label, unknown_detail
 from har_search.core.models import Criteria, Listing, ParamScore, PropertyType, ScoredListing
 
 # (tau_over, tau_under) per target parameter, in that parameter's own units.
@@ -120,7 +121,7 @@ def _param(name, score, weight, known, detail) -> ParamScore:
 def _target_param(criteria, name, target, actual, unit) -> ParamScore:
     weight = _weight(criteria, name)
     if actual is None:
-        return _param(name, 0.0, weight, False, f"{name} not published")
+        return _param(name, 0.0, weight, False, unknown_detail(name))
     tau_over, tau_under = TAU[name]
     score = target_score(actual, target, tau_over, tau_under)
     return _param(name, score, weight, True, f"{actual}{unit} vs {target}{unit} wanted")
@@ -144,8 +145,10 @@ def _ceiling_param(criteria, name, actual, ceiling, format_fn) -> ParamScore:
     """
     weight = _weight(criteria, name)
     if actual is None:
-        unknown_msg = f"no {name.replace('max_', '')}"
-        return _param(name, 0.0, weight, False, unknown_msg)
+        # `f"no {name.replace('max_', '')}"` rendered "no price_per_sqft" on
+        # screen, and the demo prospect's own example specifies a $/sqft
+        # ceiling, so that string was reachable in the demo itself.
+        return _param(name, 0.0, weight, False, unknown_detail(name))
     score = ceiling_score(actual, ceiling)
     detail = format_fn(actual, ceiling)
     return _param(name, score, weight, True, detail)
@@ -180,7 +183,7 @@ def score_listing(
             )
         )
     else:
-        params.append(_param("area", 0.0, weight, False, "no location data"))
+        params.append(_param("area", 0.0, weight, False, "no location data published"))
 
     # Ceiling parameters.
     if criteria.max_price is not None:
@@ -222,7 +225,7 @@ def score_listing(
     if criteria.max_age_years is not None:
         weight = _weight(criteria, "max_age_years")
         if listing.year_built is None:
-            params.append(_param("max_age_years", 0.0, weight, False, "no year built"))
+            params.append(_param("max_age_years", 0.0, weight, False, unknown_detail("max_age_years")))
         else:
             age = date.today().year - listing.year_built
             params.append(
@@ -240,7 +243,7 @@ def score_listing(
         weight = _weight(criteria, "property_types")
         wanted = [PropertyType(value) for value in criteria.property_types]
         if listing.property_type is None:
-            params.append(_param("property_types", 0.0, weight, False, "no type"))
+            params.append(_param("property_types", 0.0, weight, False, unknown_detail("property_types")))
         else:
             params.append(
                 _param(
@@ -256,7 +259,7 @@ def score_listing(
     if criteria.no_hoa:
         weight = _weight(criteria, "no_hoa")
         if listing.hoa is None:
-            params.append(_param("no_hoa", 0.0, weight, False, "HOA not published"))
+            params.append(_param("no_hoa", 0.0, weight, False, unknown_detail("no_hoa")))
         else:
             score = 1.0 if listing.hoa.monthly_usd == 0.0 else 0.0
             detail = "no HOA" if listing.hoa.monthly_usd == 0.0 else f"HOA ${listing.hoa.monthly_usd:.0f}/mo"
@@ -267,7 +270,7 @@ def score_listing(
         weight = _weight(criteria, "min_school_rating")
         if listing.school_rating is None:
             params.append(
-                _param("min_school_rating", 0.0, weight, False, "no school data")
+                _param("min_school_rating", 0.0, weight, False, unknown_detail("min_school_rating"))
             )
         else:
             params.append(
@@ -302,19 +305,25 @@ def score_listing(
 
 
 def _build_why(params: list[ParamScore]) -> str:
+    """Assembled from numbers by template, never generated.
+
+    Parameter names go through `param_label` because this string is read by
+    the user: "Included despite max_price_per_sqft" is a variable name, not an
+    explanation.
+    """
     known = [p for p in params if p.known]
     if not known:
         return "No comparable attributes published for this listing."
     weakest = min(known, key=lambda p: p.score)
-    strong = [p.name for p in known if p.score >= 0.9 and p.name != weakest.name]
+    strong = [param_label(p.name) for p in known if p.score >= 0.9 and p.name != weakest.name]
     if weakest.score >= 0.9:
         return "Matches every requested criterion: " + ", ".join(
-            p.name for p in known
+            param_label(p.name) for p in known
         ) + "."
     if strong:
         return (
-            f"Included despite {weakest.name} ({weakest.detail}) — "
+            f"Included despite {param_label(weakest.name)} ({weakest.detail}) — "
             + ", ".join(strong)
             + " all match."
         )
-    return f"Closest on {weakest.name} ({weakest.detail})."
+    return f"Closest on {param_label(weakest.name)} ({weakest.detail})."

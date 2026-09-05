@@ -6,6 +6,7 @@ figure would imply a confidence the data does not support.
 
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 
@@ -16,6 +17,14 @@ from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
 from har_search.core.diff import diff_snapshots
+from har_search.core.labels import (
+    basis_note,
+    change_phrase,
+    describe_exclusions,
+    evidence_phrase,
+    param_label,
+    spread_phrase,
+)
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -46,6 +55,21 @@ def criteria_counts(params: list[dict]) -> tuple[int, int]:
     return known, total
 
 
+def exclusion_summary(snapshot: dict) -> tuple[str, str]:
+    """Return (for-sale prose, sold prose) for the data-quality footer.
+
+    The two are rendered separately and deliberately. For-sale exclusions thin
+    the results table; sold exclusions thin the comp evidence behind every KPI
+    in that table. Six leases arriving inside a sold query is the most
+    dangerous data defect in this domain, and it used to leave no trace at all
+    while the footer reported a confidently smaller number.
+    """
+    return (
+        describe_exclusions(json.loads(snapshot.get("exclusions_json") or "{}")),
+        describe_exclusions(json.loads(snapshot.get("sold_exclusions_json") or "{}")),
+    )
+
+
 def create_app(db_factory) -> Starlette:
     def index(request):
         db = db_factory()
@@ -66,10 +90,17 @@ def create_app(db_factory) -> Starlette:
             known, total = criteria_counts(row["params"])
             row["criteria_known"] = known
             row["criteria_total"] = total
+        excluded, sold_excluded = exclusion_summary(snapshot)
         return TEMPLATES.TemplateResponse(
             request,
             "run.html",
-            {"snapshot": snapshot, "rows": rows, "snapshot_id": snapshot_id},
+            {
+                "snapshot": snapshot,
+                "rows": rows,
+                "snapshot_id": snapshot_id,
+                "excluded_summary": excluded,
+                "sold_excluded_summary": sold_excluded,
+            },
         )
 
     def listing_page(request):
@@ -81,8 +112,23 @@ def create_app(db_factory) -> Starlette:
         if row is None:
             raise HTTPException(status_code=404, detail="No such listing")
         row["chip"] = kpi_chip(row["valuation"].get("delta_pct"))
+        valuation = row["valuation"]
+        for param in row["params"]:
+            param["label"] = param_label(param.get("name", ""))
         return TEMPLATES.TemplateResponse(
-            request, "listing.html", {"row": row, "snapshot_id": snapshot_id}
+            request,
+            "listing.html",
+            {
+                "row": row,
+                "snapshot_id": snapshot_id,
+                "evidence": evidence_phrase(
+                    valuation.get("comp_count"),
+                    valuation.get("comp_basis", "none"),
+                    valuation.get("confidence", "insufficient"),
+                ),
+                "basis_note": basis_note(valuation.get("comp_basis")),
+                "spread_note": spread_phrase(valuation.get("spread_flag")),
+            },
         )
 
     def diff_page(request):
@@ -98,7 +144,11 @@ def create_app(db_factory) -> Starlette:
             request,
             "diff.html",
             {
-                "changes": [c for c in changes if c.change_type != "UNCHANGED"],
+                "changes": [
+                    {"change": c, "label": change_phrase(c.change_type)}
+                    for c in changes
+                    if c.change_type != "UNCHANGED"
+                ],
                 "has_previous": previous_id is not None,
                 "snapshot_id": snapshot_id,
             },

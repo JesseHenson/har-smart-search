@@ -142,3 +142,67 @@ def test_fallback_returns_none_basis_when_no_tier_matches_anything():
     # Should return empty comps with "none" basis (no tier produced a result)
     assert comps == []
     assert basis == "none", f"Expected basis 'none' for empty result, got '{basis}'"
+
+
+def test_cascade_accumulates_across_disjoint_tiers():
+    """Spec 6.1: "Walk the tiers in order, accumulating candidates."
+
+    The tiers are not nested. A same-subdivision sale with no coordinates
+    matches tier 1 and fails tiers 2-4 (they need a distance), so recomputing
+    each tier independently and keeping the single largest one throws it away
+    the moment a later tier wins.
+
+    Here tier 1 matches 2 coordinate-less Harmony sales and tier 2 matches 3
+    different sales in another subdivision half a mile away. The union is 5 —
+    enough to stop the cascade and to label the result "medium" confidence.
+    Without accumulation the answer is the largest single tier, 3, which is
+    "low" confidence on the same evidence.
+    """
+    subdivision_only = [
+        make_sale(f"SUB{i}", subdivision="Harmony", lat=None, lon=None)
+        for i in range(2)
+    ]
+    nearby_only = [
+        make_sale(f"NEAR{i}", subdivision="Elsewhere", lon=-95.37) for i in range(3)
+    ]
+
+    comps, basis = select_comps(
+        SUBJECT, subdivision_only + nearby_only, active=[], today=TODAY
+    )
+
+    ids = {c.id for c in comps}
+    assert ids == {"SUB0", "SUB1", "NEAR0", "NEAR1", "NEAR2"}, (
+        "the union of tier 1 and tier 2 must be used, not the larger of the two"
+    )
+    assert basis == "sold"
+
+
+def test_accumulated_comps_are_deduplicated_across_tiers():
+    """A sale matching several tiers must be counted once, not once per tier."""
+    sales = [make_sale(f"M{i}") for i in range(3)]  # match tiers 1, 2 and 3
+    comps, _ = select_comps(SUBJECT, sales, active=[], today=TODAY)
+    assert len(comps) == 3
+    assert len({c.id for c in comps}) == 3
+
+
+def test_one_asking_comp_downgrades_the_basis_of_the_whole_set():
+    """The label must never overstate the evidence.
+
+    Two closed sales plus three active listings is not a "sold" valuation.
+    """
+    sales = [make_sale(f"M{i}") for i in range(2)]
+    active = [
+        Listing(
+            listing_id=f"A{i}",
+            subdivision="Harmony",
+            lat=30.10,
+            lon=-95.38,
+            price=400_000,
+            sqft=2400,
+            property_type=PropertyType.SINGLE_FAMILY,
+        )
+        for i in range(3)
+    ]
+    comps, basis = select_comps(SUBJECT, sales, active=active, today=TODAY)
+    assert len(comps) == 5
+    assert basis == "asking"

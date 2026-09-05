@@ -31,8 +31,20 @@
   </tr>
   {% endfor %}
 </table>
+<h2>Data quality</h2>
 <p class="muted">
-  {{ snapshot.excluded_count }} rows excluded for data quality
-  {% if snapshot.exclusions_json %}— {{ snapshot.exclusions_json }}{% endif %}
+  {% if excluded_summary %}
+  {{ snapshot.excluded_count }} rows left out of these results — {{ excluded_summary }}.
+  {% else %}
+  {{ snapshot.excluded_count }} rows left out of these results.
+  {% endif %}
+</p>
+<p class="muted">
+  {% if sold_excluded_summary %}
+  Comparable sales: {{ sold_excluded_summary }} left out of the sold data behind
+  every estimate above. The market is thinner than the raw feed suggests.
+  {% else %}
+  Comparable sales: every sold row in this run was usable.
+  {% endif %}
 </p>
 {% endblock %}

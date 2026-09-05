@@ -20,7 +20,9 @@ def seed(tmp_path) -> tuple[object, int]:
     path = tmp_path / "web.db"
     db = Database(path)
     db.init_schema()
-    snapshot_id = db.create_snapshot("spring", "fixture", 1, 1, {"lease": 1})
+    snapshot_id = db.create_snapshot(
+        "spring", "fixture", 1, 1, {"lease": 1}, sold_exclusions={"lease": 6}
+    )
     listing = Listing(
         listing_id="L1",
         address="5519 Lynngate Dr",
@@ -45,7 +47,16 @@ def seed(tmp_path) -> tuple[object, int]:
     db.insert_scored(
         snapshot_id,
         [ScoredListing(listing, 0.91, 0.85, params, "Matches every requested criterion.")],
-        {"L1": Valuation(comp_estimate=231_000, comp_count=6, confidence="medium", delta_pct=-0.069)},
+        {
+            "L1": Valuation(
+                comp_estimate=231_000,
+                comp_count=6,
+                comp_basis="sold",
+                confidence="medium",
+                delta_pct=-0.069,
+                spread_flag="single_source",
+            )
+        },
     )
     return path, snapshot_id
 
@@ -151,3 +162,109 @@ def test_listing_page_shows_known_and_unknown_criteria(tmp_path):
     garage_row_start = text.lower().index("garage")
     garage_row = text[garage_row_start : garage_row_start + 200]
     assert "unknown" in garage_row.lower()
+
+
+# --- Data-quality footer (spec 4.2) --------------------------------------
+
+
+def test_run_page_reports_sold_exclusions_separately_from_for_sale_ones(tmp_path):
+    """Six leases inside a sold query used to vanish without trace.
+
+    `pipeline` dropped sold rows on a bare `if sale is not None`, with no
+    counter and no reason, while the footer reported only the for-sale count —
+    a confidently smaller number than the truth.
+    """
+    client, snapshot_id = client_for(tmp_path)
+    text = client.get(f"/run/{snapshot_id}").text
+    assert "6 lease listings" in text
+    assert "Comparable sales" in text
+
+
+def test_run_page_footer_is_prose_not_a_json_blob(tmp_path):
+    """The footer of the demo's main screen read `{"lease": 1}`."""
+    client, snapshot_id = client_for(tmp_path)
+    text = client.get(f"/run/{snapshot_id}").text
+    assert '{"lease"' not in text
+    assert "1 lease listing" in text
+
+
+def test_run_page_says_so_when_no_sold_rows_were_excluded(tmp_path):
+    path = tmp_path / "clean.db"
+    db = Database(path)
+    db.init_schema()
+    snapshot_id = db.create_snapshot("spring", "fixture", 1, 0, {}, sold_exclusions={})
+    client = TestClient(create_app(lambda: Database(path)))
+    text = client.get(f"/run/{snapshot_id}").text
+    assert "every sold row in this run was usable" in text.lower()
+
+
+# --- Raw machine tokens must not reach the screen (spec 9) ---------------
+
+
+def test_listing_page_renders_no_raw_literal_tokens(tmp_path):
+    """The page read "Sources single_source." and "6 comps, sold, medium confidence"."""
+    client, snapshot_id = client_for(tmp_path)
+    text = client.get(f"/run/{snapshot_id}/listing/L1")
+    body = text.text
+    assert "single_source" not in body
+    assert "6 comparable closed sales, medium confidence" in body
+    assert "Only one source of value" in body
+
+
+def test_asking_basis_valuation_is_qualified_as_budget_bounded(tmp_path):
+    """Tier 4's pool is this run's own listings, bounded by the user's budget.
+
+    Every asking-basis estimate is therefore computed against a pool truncated
+    near the budget, biasing estimates downward and making pricier candidates
+    look systematically overpriced. The screen must say so.
+    """
+    path = tmp_path / "asking.db"
+    db = Database(path)
+    db.init_schema()
+    snapshot_id = db.create_snapshot("spring", "fixture", 1, 0, {})
+    listing = Listing(listing_id="L1", address="1 Main St", price=215_000)
+    db.insert_scored(
+        snapshot_id,
+        [ScoredListing(listing, 0.9, 1.0, [], "why")],
+        {
+            "L1": Valuation(
+                comp_estimate=200_000,
+                comp_count=5,
+                comp_basis="asking",
+                confidence="medium",
+                delta_pct=0.075,
+            )
+        },
+    )
+    client = TestClient(create_app(lambda: Database(path)))
+    body = client.get(f"/run/{snapshot_id}/listing/L1").text
+    assert "asking prices, not closed sales" in body
+    assert "budget range you searched" in body
+    assert "not the open market" in body
+
+
+def test_diff_page_renders_change_types_as_english(tmp_path):
+    """The screen printed the raw classification token `PRICE_CUT`."""
+    path = tmp_path / "diff.db"
+    db = Database(path)
+    db.init_schema()
+    first = db.create_snapshot("spring", "fixture", 1, 0, {})
+    second = db.create_snapshot("spring", "fixture", 1, 0, {})
+    for snapshot_id, price in ((first, 250_000), (second, 230_000)):
+        db.insert_scored(
+            snapshot_id,
+            [
+                ScoredListing(
+                    Listing(listing_id="L1", address="1 Main St", price=price),
+                    0.9,
+                    1.0,
+                    [],
+                    "why",
+                )
+            ],
+            {},
+        )
+    client = TestClient(create_app(lambda: Database(path)))
+    body = client.get(f"/run/{second}/diff").text
+    assert "PRICE_CUT" not in body
+    assert "Price cut" in body

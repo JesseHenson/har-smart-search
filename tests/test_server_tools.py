@@ -44,9 +44,11 @@ def make_result() -> SearchResult:
     )
     return SearchResult(
         snapshot_id=7,
+        saved_search="Spring #a1b2c3d4",
         scored=[scored],
         valuations={"L1": valuation},
         exclusions={"lease": 2},
+        sold_exclusions={"lease": 6, "missing_sold_price": 1},
         dropped_by_must=1,
     )
 
@@ -112,3 +114,75 @@ def test_whats_new_groups_changes_by_type():
     assert len(payload["price_cut"]) == 1
     assert len(payload["gone"]) == 1
     assert payload["unchanged_count"] == 1
+
+
+# --- Prose alongside the machine-readable values -------------------------
+
+
+def test_explain_qualifies_an_asking_basis_comparison():
+    """Spec 6.1 tier 4 fires most often, and its pool is budget-bounded.
+
+    The tier-4 asking-comp pool is the run's own scored listings, which
+    survived a vendor bound of budget x 1.25, a result limit and the `must`
+    gate. `comp_basis` stays machine-readable; what the user is told changes.
+    """
+    row = {
+        "listing": Listing(listing_id="L1", address="1 Main St", price=215_000),
+        "score": 0.9,
+        "coverage": 1.0,
+        "why": "why",
+        "params": [],
+        "valuation": {
+            "comp_count": 5,
+            "comp_basis": "asking",
+            "confidence": "medium",
+            "spread_flag": "single_source",
+        },
+    }
+    payload = build_explain_response(row, [])
+    assert payload["valuation"]["comp_basis"] == "asking"
+    note = payload["basis_note"]
+    assert "asking prices, not closed sales" in note
+    assert "budget range you searched" in note
+    assert "not the open market" in note
+
+
+def test_explain_of_a_sold_basis_makes_no_budget_caveat():
+    row = {
+        "listing": Listing(listing_id="L1", address="1 Main St", price=215_000),
+        "score": 0.9,
+        "coverage": 1.0,
+        "why": "why",
+        "params": [],
+        "valuation": {
+            "comp_count": 6,
+            "comp_basis": "sold",
+            "confidence": "medium",
+            "spread_flag": "clustered",
+        },
+    }
+    payload = build_explain_response(row, [])
+    assert "budget range" not in payload["basis_note"]
+    assert payload["evidence"] == "6 comparable closed sales, medium confidence"
+
+
+def test_search_response_keeps_tokens_and_adds_prose():
+    payload = build_search_response(make_result(), limit=10, dashboard_url="http://x/run/7")
+    row = payload["results"][0]
+    assert row["comp_basis"] == "sold"  # still machine-readable
+    assert row["evidence"] == "6 comparable closed sales, medium confidence"
+    assert "closed sales" in row["basis_note"]
+
+
+def test_search_response_reports_sold_exclusions_distinctly():
+    payload = build_search_response(make_result(), limit=10, dashboard_url="http://x/run/7")
+    assert payload["excluded"] == {"lease": 2}
+    assert payload["sold_excluded"] == {"lease": 6, "missing_sold_price": 1}
+    assert "6 lease listings" in payload["sold_excluded_summary"]
+    assert "2 lease listings" in payload["excluded_summary"]
+
+
+def test_search_response_returns_the_saved_search_key_for_whats_new():
+    """Keys carry a hash the model cannot invent, so `search` has to hand it back."""
+    payload = build_search_response(make_result(), limit=10, dashboard_url="http://x/run/7")
+    assert payload["saved_search"] == "Spring #a1b2c3d4"

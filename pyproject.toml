@@ -24,3 +24,10 @@ packages = ["src/har_search"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# The `error` half is the point. With one known third-party warning tolerated
+# and everything else fatal, a NEW warning becomes a test failure rather than
+# a line nobody reads. Do not broaden this list to silence our own warnings.
+filterwarnings = [
+    "error",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]

@@ -8,7 +8,17 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 
-from har_search.core.models import DuplexScope, GarageInfo, HOA, Listing, MoneyRange, NormalizeResult, PropertyType, Sale
+from har_search.core.models import (
+    DuplexScope,
+    GarageInfo,
+    HOA,
+    Listing,
+    MoneyRange,
+    NormalizeResult,
+    NormalizeSaleResult,
+    PropertyType,
+    Sale,
+)
 
 SQFT_PER_ACRE = 43_560
 
@@ -171,6 +181,24 @@ def _float_or_none(value) -> float | None:
         return None
 
 
+def apply_beds_guard(beds: int | None, sqft: int | None) -> tuple[int | None, bool]:
+    """Spec 4.2's implausible-beds guard, shared by both normalizers.
+
+    Recon's 2322 Shadow Glen claims 10 bedrooms on 4,507 sqft. That row is a
+    *sold* record, so it reaches the product through `normalize_sale` and then
+    feeds the bedroom-adjustment median in `comps.py`, where it can move a
+    valuation by the full +/-9% bedroom cap in the wrong direction. The guard
+    therefore cannot live inside `normalize_listing` alone.
+
+    Returns (beds, suspect) — beds is None when the count is implausible.
+    """
+    if beds is not None and beds > MAX_PLAUSIBLE_BEDS and (
+        sqft is None or sqft < BEDS_PLAUSIBILITY_SQFT
+    ):
+        return None, True
+    return beds, False
+
+
 def _school_rating(schools: dict | None) -> float | None:
     if not schools:
         return None
@@ -206,12 +234,9 @@ def normalize_listing(raw: dict) -> NormalizeResult:
         return NormalizeResult(listing=None, exclusion="price_below_floor")
 
     flags: list[str] = []
-    beds = _positive_or_none(raw.get("beds"))
     sqft = _positive_or_none(raw.get("sqft"))
-    if beds is not None and beds > MAX_PLAUSIBLE_BEDS and (
-        sqft is None or sqft < BEDS_PLAUSIBILITY_SQFT
-    ):
-        beds = None
+    beds, suspect_beds = apply_beds_guard(_positive_or_none(raw.get("beds")), sqft)
+    if suspect_beds:
         flags.append("suspect_beds")
 
     address = raw.get("address")
@@ -248,17 +273,35 @@ def normalize_listing(raw: dict) -> NormalizeResult:
     return NormalizeResult(listing=listing, exclusion=None)
 
 
-def normalize_sale(raw: dict) -> Sale | None:
+def normalize_sale(raw: dict) -> NormalizeSaleResult:
+    """Sold rows, with every exclusion named.
+
+    Spec 4.2: "Every excluded row is recorded with its reason... Silent
+    dropping is not acceptable — the user needs to know when the market is
+    thinner than it looks." A sold query that quietly swallows six leases
+    reports a market that looks healthier than it is.
+    """
     property_type, is_lease = canon_property_type(raw.get("propertyType"))
     if is_lease or (raw.get("status") or "").strip().lower() == "rented":
-        return None
+        return NormalizeSaleResult(sale=None, exclusion="lease")
 
     sold_price = _positive_or_none(raw.get("soldPrice"))
-    sold_date = _parse_date(raw.get("soldDate"))
-    if sold_price is None or sold_date is None or sold_price < SALE_PRICE_FLOOR:
-        return None
+    if sold_price is None:
+        return NormalizeSaleResult(sale=None, exclusion="missing_sold_price")
+    if sold_price < SALE_PRICE_FLOOR:
+        return NormalizeSaleResult(sale=None, exclusion="price_below_floor")
 
-    return Sale(
+    sold_date = _parse_date(raw.get("soldDate"))
+    if sold_date is None:
+        return NormalizeSaleResult(sale=None, exclusion="missing_sold_date")
+
+    flags: list[str] = []
+    sqft = _positive_or_none(raw.get("sqft"))
+    beds, suspect_beds = apply_beds_guard(_positive_or_none(raw.get("beds")), sqft)
+    if suspect_beds:
+        flags.append("suspect_beds")
+
+    sale = Sale(
         mls_number=str(raw.get("mlsNumber")),
         sold_price=sold_price,
         sold_date=sold_date,
@@ -270,10 +313,12 @@ def normalize_sale(raw: dict) -> Sale | None:
         lon=_float_or_none(raw.get("longitude")),
         list_price=_positive_or_none(raw.get("price")),
         sold_price_per_sqft=_float_or_none(raw.get("soldPricePerSqft")),
-        sqft=_positive_or_none(raw.get("sqft")),
-        beds=_positive_or_none(raw.get("beds")),
+        sqft=sqft,
+        beds=beds,
         baths_full=_positive_or_none(raw.get("bathsFull")),
         year_built=_positive_or_none(raw.get("yearBuilt")),
         lot_sqft=parse_lot(raw.get("lotSize")),
         property_type=property_type,
+        flags=tuple(flags),
     )
+    return NormalizeSaleResult(sale=sale, exclusion=None)

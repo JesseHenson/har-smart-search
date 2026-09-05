@@ -101,6 +101,10 @@ Applied after parsing, before anything reaches scoring or comps:
 
 Every excluded row is recorded with its reason and surfaced in the dashboard as a data-quality count. Silent dropping is not acceptable — the user needs to know when the market is thinner than it looks.
 
+This applies to **sold** rows as much as for-sale ones, and the two counts are kept and shown separately. A for-sale exclusion thins the results table; a sold exclusion thins the comparable-sale evidence behind every KPI in that table. Leases arriving inside a sold query are the most dangerous defect in this domain, so `normalize_sale` returns a reason exactly as `normalize_listing` does, and the dashboard footer reports the two counts distinctly.
+
+The implausible-beds guard applies on both paths for the same reason: recon's named bad row — 2322 Shadow Glen, 10 bedrooms on 4,507 sqft — is a *sold* record, and an unguarded copy of it feeds the bedroom-adjustment median in §6.2.
+
 ## 5. Similarity scoring (R1)
 
 ### 5.1 Shape
@@ -277,7 +281,7 @@ CREATE TABLE snapshots (
   id INTEGER PRIMARY KEY, saved_search_id INTEGER REFERENCES saved_searches(id),
   run_at TEXT NOT NULL, source TEXT NOT NULL,
   item_count INTEGER NOT NULL, excluded_count INTEGER NOT NULL,
-  exclusions_json TEXT
+  exclusions_json TEXT, sold_exclusions_json TEXT
 );
 
 CREATE TABLE listings (

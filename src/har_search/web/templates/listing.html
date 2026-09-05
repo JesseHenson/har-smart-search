@@ -10,7 +10,7 @@
   <tr><th>Criterion</th><th>Score</th><th>Detail</th></tr>
   {% for p in row.params %}
   <tr>
-    <td>{{ p.name }}</td>
+    <td>{{ p.label }}</td>
     <td>{% if p.known %}<div class="bar"><span style="width: {{ (p.score * 100)|round }}%"></span></div>{% else %}<span class="muted">unknown</span>{% endif %}</td>
     <td class="muted">{{ p.detail }}</td>
   </tr>
@@ -26,7 +26,7 @@
   <tr>
     <td>Comparable sales</td>
     <td>{% if row.valuation.comp_estimate %}${{ "{:,}".format(row.valuation.comp_estimate) }}{% else %}Not enough comps{% endif %}</td>
-    <td class="muted">{{ row.valuation.comp_count }} comps, {{ row.valuation.comp_basis }}, {{ row.valuation.confidence }} confidence</td>
+    <td class="muted">{{ evidence }}</td>
   </tr>
   {% if row.valuation.appraisal_district %}
   <tr>
@@ -43,5 +43,6 @@
   </tr>
   {% endif %}
 </table>
-<p class="muted">Sources {{ row.valuation.spread_flag }}.</p>
+<p class="muted">{{ basis_note }}</p>
+<p class="muted">{{ spread_note }}</p>
 {% endblock %}

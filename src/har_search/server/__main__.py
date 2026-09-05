@@ -1,4 +1,4 @@
-"""FastMCP entrypoint.
+"""MCP server entrypoint.
 
 The model fills in criteria and narrates results. It never computes a KPI —
 every number in a response was produced by har_search.core.
@@ -12,6 +12,14 @@ from mcp.server.mcpserver import MCPServer
 
 from har_search import config
 from har_search.core.diff import diff_snapshots
+from har_search.core.keys import resolve_saved_search, snapshot_key
+from har_search.core.labels import (
+    basis_note,
+    confidence_phrase,
+    describe_exclusions,
+    evidence_phrase,
+    spread_phrase,
+)
 from har_search.core.models import Criteria, ListingChange
 from har_search.pipeline import SearchResult, run_search
 from har_search.sources.apify_memo23 import ApifyMemo23Source
@@ -59,22 +67,35 @@ def build_search_response(
                 "why": scored.why,
                 "estimated_value": valuation.comp_estimate if valuation else None,
                 "comp_count": valuation.comp_count if valuation else 0,
+                # comp_basis / confidence stay machine-readable; the *_note
+                # fields are what the model should read out loud.
                 "comp_basis": valuation.comp_basis if valuation else "none",
                 "confidence": valuation.confidence if valuation else "insufficient",
+                "evidence": evidence_phrase(
+                    valuation.comp_count if valuation else 0,
+                    valuation.comp_basis if valuation else "none",
+                    valuation.confidence if valuation else "insufficient",
+                ),
+                "basis_note": basis_note(valuation.comp_basis if valuation else "none"),
                 "delta_pct": valuation.delta_pct if valuation else None,
             }
         )
     return {
         "snapshot_id": result.snapshot_id,
+        "saved_search": result.saved_search,
         "dashboard_url": dashboard_url,
         "results": rows,
         "excluded": result.exclusions,
+        "excluded_summary": describe_exclusions(result.exclusions),
+        "sold_excluded": result.sold_exclusions,
+        "sold_excluded_summary": describe_exclusions(result.sold_exclusions),
         "dropped_by_must": result.dropped_by_must,
     }
 
 
 def build_explain_response(row: dict, comps: list[dict]) -> dict:
     listing = row["listing"]
+    valuation = row["valuation"]
     return {
         "listing_id": listing.listing_id,
         "address": listing.address,
@@ -83,7 +104,20 @@ def build_explain_response(row: dict, comps: list[dict]) -> dict:
         "coverage": row["coverage"],
         "why": row["why"],
         "params": row["params"],
-        "valuation": row["valuation"],
+        "valuation": valuation,
+        # The stored valuation keeps its Literal tokens. These are the same
+        # facts in the words the model should use. `basis_note` in particular
+        # carries the tier-4 caveat: an asking-basis estimate is computed
+        # against this run's own listings, which were bounded by the searched
+        # budget rather than drawn from the open market.
+        "evidence": evidence_phrase(
+            valuation.get("comp_count"),
+            valuation.get("comp_basis", "none"),
+            valuation.get("confidence", "insufficient"),
+        ),
+        "basis_note": basis_note(valuation.get("comp_basis")),
+        "confidence_note": confidence_phrase(valuation.get("confidence")),
+        "spread_note": spread_phrase(valuation.get("spread_flag")),
         "comps": comps,
     }
 
@@ -123,6 +157,13 @@ def search(
     Every result carries a similarity score, a coverage figure showing how
     many requested criteria were actually published, and a value KPI derived
     from comparable sales.
+
+    Listings over the stated budget are included on purpose, ranked lower —
+    that is the "show me some above $200,000 if there is nothing below"
+    behaviour, not a bug.
+
+    The response carries a `saved_search` key. Pass that same key to
+    `whats_new` to compare this search against its own previous run.
     """
     criteria = Criteria(
         area=area,
@@ -138,7 +179,9 @@ def search(
     )
     db = _db()
     source = ApifyMemo23Source(token=config.apify_token())
-    result = run_search(source, db, criteria, saved_search=area, limit=limit)
+    result = run_search(
+        source, db, criteria, saved_search=snapshot_key(criteria), limit=limit
+    )
     base = ensure_dashboard_running(config.dashboard_port())
     return build_search_response(
         result, limit, dashboard_url=f"{base}/run/{result.snapshot_id}"
@@ -180,9 +223,18 @@ def explain(listing_id: str, snapshot_id: int) -> dict:
 
 @mcp.tool()
 def whats_new(saved_search: str) -> dict:
-    """Compare the two most recent runs of a saved search."""
+    """Compare the two most recent runs of a saved search.
+
+    Pass the `saved_search` key returned by `search`. A bare area name works
+    too when only one search has been run in that area; when several have, the
+    tool names them rather than guessing, because diffing two different
+    searches against each other reports every listing as new or gone.
+    """
     db = _db()
-    snapshots = db.recent_snapshots(saved_search, limit=2)
+    key, error = resolve_saved_search(saved_search, db.saved_search_keys())
+    if error is not None:
+        return {"error": error}
+    snapshots = db.recent_snapshots(key, limit=2)
     if len(snapshots) < 2:
         return {
             "error": "Only one snapshot exists so far. Run the search again later"

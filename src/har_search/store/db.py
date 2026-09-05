@@ -35,9 +35,25 @@ class Database:
         self._conn = sqlite3.connect(self.path)
         self._conn.row_factory = sqlite3.Row
 
+    # Columns added after the first release. CREATE TABLE IF NOT EXISTS will
+    # not add a column to a table that already exists, and the demo database is
+    # captured days before the meeting, so an in-place migration is the only
+    # thing standing between a new column and a broken existing database.
+    _ADDED_COLUMNS = (("snapshots", "sold_exclusions_json", "TEXT"),)
+
     def init_schema(self) -> None:
         self._conn.executescript(SCHEMA_PATH.read_text())
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        for table, column, decl in self._ADDED_COLUMNS:
+            existing = {
+                row["name"]
+                for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     def create_snapshot(
         self,
@@ -46,10 +62,12 @@ class Database:
         item_count: int,
         excluded_count: int,
         exclusions: dict,
+        sold_exclusions: dict | None = None,
     ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO snapshots (saved_search, run_at, source, item_count,"
-            " excluded_count, exclusions_json) VALUES (?, ?, ?, ?, ?, ?)",
+            " excluded_count, exclusions_json, sold_exclusions_json)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 saved_search,
                 datetime.now().isoformat(timespec="seconds"),
@@ -57,6 +75,7 @@ class Database:
                 item_count,
                 excluded_count,
                 json.dumps(exclusions),
+                json.dumps(sold_exclusions or {}),
             ),
         )
         self._conn.commit()
@@ -291,6 +310,12 @@ class Database:
             (saved_search, limit),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def saved_search_keys(self) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT DISTINCT saved_search FROM snapshots ORDER BY saved_search"
+        ).fetchall()
+        return [row["saved_search"] for row in rows]
 
     def get_snapshot(self, snapshot_id: int) -> dict | None:
         row = self._conn.execute(

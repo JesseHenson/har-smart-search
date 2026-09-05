@@ -149,8 +149,43 @@ def test_subdivision_list_to_sold_ratio():
         make_sale("M1", 460_000, list_price=470_000),
         make_sale("M2", 375_000, list_price=360_000),
     ]
-    ratio = subdivision_list_to_sold(sales)
+    ratio = subdivision_list_to_sold(sales, "Harmony")
     assert 0.90 < ratio < 1.00
+
+
+def test_subdivision_list_to_sold_survives_a_capitalization_difference():
+    """Vendor subdivision strings are free text.
+
+    Tier matching normalized case; this filter used `==`. So six comps could
+    agree they shared the subject's subdivision while the list-to-sold ratio —
+    "arguably the most actionable number the tool can produce" — returned None
+    because one row said "HARMONY" and the subject said "Harmony".
+    """
+    sales = [
+        make_sale("M0", 400_000, list_price=475_000),
+        make_sale("M1", 460_000, list_price=470_000),
+        make_sale("M2", 375_000, list_price=360_000),
+    ]
+    for sale in sales:
+        sale.subdivision = "  HARMONY "
+    ratio = subdivision_list_to_sold(sales, "Harmony")
+    assert ratio is not None
+    assert 0.90 < ratio < 1.00
+
+
+def test_subdivision_list_to_sold_is_none_when_the_subdivision_is_unknown():
+    """An unknown subdivision must not silently become an area-wide ratio."""
+    sales = [make_sale("M0", 400_000, list_price=475_000)]
+    assert subdivision_list_to_sold(sales, None) is None
+
+
+def test_valuation_ratio_survives_a_capitalization_difference_end_to_end():
+    """The same defect through `value_listing`, where it actually bit."""
+    sales = [make_sale(f"M{i}", 360_000, list_price=380_000) for i in range(6)]
+    for sale in sales:
+        sale.subdivision = "harmony"
+    valuation = value_listing(subject(), sales, active=[], today=TODAY)
+    assert valuation.subdivision_list_to_sold is not None
 
 
 def test_appraisal_district_value_is_carried_through():

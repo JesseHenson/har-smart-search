@@ -7,9 +7,10 @@
 {% else %}
 <table>
   <tr><th>Change</th><th>Address</th><th>Was</th><th>Now</th></tr>
-  {% for c in changes %}
+  {% for item in changes %}
+  {% set c = item.change %}
   <tr>
-    <td>{{ c.change_type }}</td>
+    <td>{{ item.label }}</td>
     <td>{{ c.address }}</td>
     <td>{% if c.old_price %}${{ "{:,}".format(c.old_price) }}{% else %}—{% endif %}</td>
     <td>{% if c.new_price %}${{ "{:,}".format(c.new_price) }}{% else %}—{% endif %}</td>

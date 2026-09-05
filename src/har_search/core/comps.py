@@ -105,6 +105,20 @@ def comps_from_listings(subject: Listing, listings: list[Listing]) -> list[Comp]
     return comps
 
 
+def _same_subdivision(left: str | None, right: str | None) -> bool:
+    """The single definition of "same subdivision".
+
+    Vendor subdivision strings are free text. Tier matching normalized case
+    while the list-to-sold filter compared with `==`, so six comps could agree
+    they shared the subject's subdivision while the list-to-sold ratio — the
+    most actionable number the tool produces — returned None on a
+    capitalization difference alone.
+    """
+    if not left or not right:
+        return False
+    return left.strip().lower() == right.strip().lower()
+
+
 def _tier_matches(subject: Listing, comp: Comp, tier: Tier, today: date) -> bool:
     if not _size_ok(subject.sqft, comp.sqft, tier.sqft_tolerance):
         return False
@@ -114,11 +128,7 @@ def _tier_matches(subject: Listing, comp: Comp, tier: Tier, today: date) -> bool
         if comp.sold_date < today - timedelta(days=tier.max_days):
             return False
     if tier.name == "subdivision":
-        return bool(
-            subject.subdivision
-            and comp.subdivision
-            and subject.subdivision.lower() == comp.subdivision.lower()
-        )
+        return _same_subdivision(subject.subdivision, comp.subdivision)
     if tier.max_miles is not None:
         return comp.distance_miles is not None and comp.distance_miles <= tier.max_miles
     return True
@@ -136,30 +146,54 @@ def _same_type_listings(subject: Listing, listings: list[Listing]) -> list[Listi
     return [l for l in listings if l.property_type == subject.property_type]
 
 
+def _basis_of(comps: dict[str, Comp]) -> str:
+    """The weakest basis present wins.
+
+    The label must never overstate the evidence: an accumulated set holding
+    four closed sales and two active listings is not a "sold" valuation, so
+    one asking comp downgrades the whole set to asking.
+    """
+    if not comps:
+        return "none"
+    if any(c.basis == "asking" for c in comps.values()):
+        return "asking"
+    return "sold"
+
+
 def select_comps(
     subject: Listing,
     sales: list[Sale],
     active: list[Listing],
     today: date,
 ) -> tuple[list[Comp], str]:
-    """Walk the tiers in order; stop at the first that reaches TARGET_COMPS.
+    """Walk the tiers in order, ACCUMULATING candidates (spec 6.1).
 
-    If every tier falls short, return the widest non-empty result and let
+    Stop at the first tier where the accumulated pool reaches TARGET_COMPS. If
+    every tier is exhausted below that, return everything accumulated and let
     the confidence label describe how thin it is.
+
+    The tiers are not nested, so recomputing each independently and keeping
+    the single largest one discards real evidence: a same-subdivision sale
+    with no coordinates matches tier 1 and fails tiers 2-4, and vanishes the
+    moment a later tier wins. In a product whose binding constraint is comp
+    density, that is the difference between "medium" and "low" confidence on
+    the same data.
     """
     sold_comps = comps_from_sales(subject, _same_type(subject, sales), today)
     active_comps = comps_from_listings(subject, _same_type_listings(subject, active))
 
-    best: list[Comp] = []
-    best_basis = "none"
+    # dict rather than set: keyed on comp id to deduplicate across tiers, and
+    # insertion-ordered so the closest, most recent tiers stay first.
+    accumulated: dict[str, Comp] = {}
     for tier in TIERS:
         pool = active_comps if tier.basis == "asking" else sold_comps
-        matched = [c for c in pool if _tier_matches(subject, c, tier, today)]
-        if len(matched) > len(best):
-            best, best_basis = matched, tier.basis
-        if len(matched) >= TARGET_COMPS:
-            return matched, tier.basis
-    return best, best_basis if best else "none"
+        for comp in pool:
+            if comp.id not in accumulated and _tier_matches(subject, comp, tier, today):
+                accumulated[comp.id] = comp
+        if len(accumulated) >= TARGET_COMPS:
+            break
+
+    return list(accumulated.values()), _basis_of(accumulated)
 
 
 ADJUSTMENTS = {
@@ -234,7 +268,20 @@ def _adjustment_factor(subject: Listing, comps: list[Comp]) -> float:
     return _clamp(factor, AGGREGATE_ADJUSTMENT_CAP)
 
 
-def subdivision_list_to_sold(sales: list[Sale]) -> float | None:
+def subdivision_list_to_sold(sales: list[Sale], subdivision: str | None) -> float | None:
+    """Median sold/list ratio across one subdivision's closed sales.
+
+    `subdivision` is required, and an unknown one yields None rather than a
+    ratio over every sale in range — this number is labelled "subdivision
+    list-to-sold" on screen and must not quietly become an area-wide figure.
+
+    The filter lives here, behind `_same_subdivision`, rather than at the call
+    site: the call site used `==` while tier matching used `.lower()`, and the
+    two disagreeing is exactly how this returned None on capitalization alone.
+    """
+    if not subdivision:
+        return None
+    sales = [s for s in sales if _same_subdivision(s.subdivision, subdivision)]
     ratios = [
         sale.sold_price / sale.list_price
         for sale in sales
@@ -264,9 +311,7 @@ def value_listing(
         comp_basis=basis if comps else "none",
         confidence=confidence_label(len(comps)),
         appraisal_district=subject.appraisal,
-        subdivision_list_to_sold=subdivision_list_to_sold(
-            [s for s in sales if s.subdivision and s.subdivision == subject.subdivision]
-        ),
+        subdivision_list_to_sold=subdivision_list_to_sold(sales, subject.subdivision),
     )
 
     if len(comps) < MIN_COMPS_FOR_ESTIMATE or not subject.sqft:
