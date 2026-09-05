@@ -75,6 +75,24 @@ def test_parse_money_abbrev_returns_none_for_missing():
     assert parse_money_abbrev(None) is None
 
 
+def test_parse_money_abbrev_fallback_handles_decimal_format():
+    """Fallback path correctly parses decimal-formatted prices."""
+    rng = parse_money_abbrev("$425,000.00")
+    assert rng.low == 425_000
+    assert rng.high == 425_000
+
+    rng = parse_money_abbrev("$425,000")
+    assert rng.low == 425_000
+    assert rng.high == 425_000
+
+
+def test_parse_money_abbrev_fallback_rejects_malformed():
+    """Fallback path returns None for invalid/malformed input."""
+    assert parse_money_abbrev("$") is None
+    assert parse_money_abbrev("n/a") is None
+    assert parse_money_abbrev("$$$") is None
+
+
 def test_canon_property_type_catches_the_hyphen_trap():
     """'Single-Family' is a sale record; 'Single Family' is a lease record."""
     assert canon_property_type("Single-Family") == (PropertyType.SINGLE_FAMILY, False)

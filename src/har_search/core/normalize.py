@@ -83,10 +83,16 @@ def parse_money_abbrev(raw: str | None) -> MoneyRange | None:
         return None
     match = _ABBREV_RE.match(raw.strip())
     if not match:
-        digits = re.sub(r"[^\d]", "", raw)
-        if not digits:
+        # Fallback for non-abbreviated formats like "$425,000.00" or "$425,000"
+        # Strip currency symbols, whitespace, and thousands separators, but keep decimal point
+        cleaned = re.sub(r"[$\s,]", "", raw.strip())
+        if not cleaned:
             return None
-        exact = int(digits)
+        try:
+            exact = int(round(float(cleaned)))
+        except ValueError:
+            # Invalid number (multiple decimals, garbage, etc.)
+            return None
         return MoneyRange(low=exact, high=exact)
     number, suffix = match.group(1), match.group(2).upper()
     multiplier = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}[suffix]
