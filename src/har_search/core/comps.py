@@ -173,10 +173,12 @@ AGGREGATE_ADJUSTMENT_CAP = 0.15
 
 
 def trimmed_median(values: list[float]) -> float:
-    """Drop the extremes before taking the median.
+    """Return the median, which is inherently resistant to outliers.
 
-    This is what keeps one bad source row from moving a whole
-    neighbourhood's estimate.
+    The symmetric 10% trim is a no-op (removing k elements from each end shifts
+    the median index by k, preserving the result). It is retained as a guard in
+    case the estimator changes to a mean, where trimming would provide genuine
+    robustness.
     """
     ordered = sorted(values)
     if len(ordered) >= 5:
