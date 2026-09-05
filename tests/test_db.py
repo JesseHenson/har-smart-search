@@ -1,6 +1,13 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
-from har_search.core.models import Listing, PropertyType, Sale, ScoredListing, Valuation
+from har_search.core.models import (
+    GarageInfo,
+    Listing,
+    PropertyType,
+    Sale,
+    ScoredListing,
+    Valuation,
+)
 from har_search.store.db import Database
 
 TODAY = date(2026, 9, 4)
@@ -101,3 +108,94 @@ def test_recent_snapshots_returns_newest_first(tmp_path):
     second = db.create_snapshot("s", "apify_memo23", 2, 0, {})
     snapshots = db.recent_snapshots("s", limit=2)
     assert [s["id"] for s in snapshots] == [second, first]
+
+
+def test_upsert_sales_preserves_first_seen_on_reupsert(tmp_path, monkeypatch):
+    """first_seen must record original discovery, not the latest scan.
+
+    Task 11's pipeline calls upsert_sales on every run for every sold row it
+    fetches, so a re-upsert must not reset first_seen to "now". We control
+    the clock so the two upserts get distinguishable timestamps: if the fix
+    were reverted (a blind INSERT OR REPLACE), SQLite implements that as a
+    delete-and-insert on the primary-key conflict, and first_seen would come
+    back equal to the *second* call's timestamp instead of the first's.
+    """
+    import har_search.store.db as db_module
+
+    fake_now_values = [datetime(2026, 1, 1, 8, 0, 0), datetime(2026, 6, 1, 9, 30, 0)]
+
+    class FakeDatetime:
+        _values = iter(fake_now_values)
+
+        @classmethod
+        def now(cls):
+            return next(cls._values)
+
+    monkeypatch.setattr(db_module, "datetime", FakeDatetime)
+
+    db = make_db(tmp_path)
+    sale = Sale(
+        mls_number="M2",
+        sold_price=300_000,
+        sold_date=TODAY,
+        subdivision="Harmony",
+        lat=30.10,
+        lon=-95.38,
+        sqft=2000,
+        property_type=PropertyType.SINGLE_FAMILY,
+    )
+    db.upsert_sales([sale])
+
+    updated_sale = Sale(
+        mls_number="M2",
+        sold_price=305_000,
+        sold_date=TODAY,
+        subdivision="Harmony",
+        lat=30.10,
+        lon=-95.38,
+        sqft=2000,
+        property_type=PropertyType.SINGLE_FAMILY,
+    )
+    db.upsert_sales([updated_sale])
+
+    row = db._conn.execute(
+        "SELECT first_seen, sold_price FROM sold_history WHERE mls_number = ?",
+        ("M2",),
+    ).fetchone()
+    assert row["sold_price"] == 305_000
+    assert row["first_seen"] == fake_now_values[0].isoformat(timespec="seconds")
+
+
+def test_garage_info_round_trips_attached_and_tags(tmp_path):
+    """attached and tags must survive storage, not degrade to unknown/empty.
+
+    If the fix were reverted (only garage_spaces persisted), the read-back
+    GarageInfo would have attached=None and tags=(), which would not equal
+    the original GarageInfo(spaces=3, attached=True, tags=(...)).
+    """
+    db = make_db(tmp_path)
+    snapshot_id = db.create_snapshot("s", "apify_memo23", 1, 0, {})
+    scored = make_scored()
+    scored.listing.garage = GarageInfo(spaces=3, attached=True, tags=("oversized", "tandem"))
+    db.insert_scored(snapshot_id, [scored], {})
+
+    listings = db.get_snapshot_listings(snapshot_id)
+    assert listings[0].garage == GarageInfo(spaces=3, attached=True, tags=("oversized", "tandem"))
+    assert isinstance(listings[0].garage.tags, tuple)
+
+
+def test_garage_attached_none_round_trips_as_none_not_false(tmp_path):
+    """attached is tri-state: unknown (None) must not collapse to False.
+
+    If None were coerced to False on the way in (or reconstructed as False
+    on the way out), this equality would fail even though spaces/tags match.
+    """
+    db = make_db(tmp_path)
+    snapshot_id = db.create_snapshot("s", "apify_memo23", 1, 0, {})
+    scored = make_scored()
+    scored.listing.garage = GarageInfo(spaces=2, attached=None, tags=())
+    db.insert_scored(snapshot_id, [scored], {})
+
+    listings = db.get_snapshot_listings(snapshot_id)
+    assert listings[0].garage.attached is None
+    assert listings[0].garage == GarageInfo(spaces=2, attached=None, tags=())

@@ -68,18 +68,25 @@ class Database:
         scored: list[ScoredListing],
         valuations: dict[str, Valuation],
     ) -> None:
+        # listing.raw is deliberately never persisted here: it's the large, re-fetchable vendor payload.
         for item in scored:
             listing = item.listing
             valuation = valuations.get(listing.listing_id, Valuation())
+            garage = listing.garage
+            garage_attached = (
+                None if garage is None or garage.attached is None else int(garage.attached)
+            )
+            garage_tags_json = None if garage is None else json.dumps(list(garage.tags))
             self._conn.execute(
                 "INSERT OR REPLACE INTO listings (snapshot_id, listing_id, mls_number,"
                 " address, city, zip, subdivision, lat, lon, price, price_per_sqft,"
                 " beds, baths_full, baths_half, sqft, lot_sqft, year_built,"
-                " garage_spaces, hoa_monthly, property_type, duplex_scope, status,"
+                " garage_spaces, garage_attached, garage_tags_json, hoa_monthly,"
+                " property_type, duplex_scope, status,"
                 " days_on_market, school_rating, tax_rate, appraisal_low,"
                 " appraisal_high, url, score, coverage, why, score_breakdown_json,"
                 " valuation_json, flags_json)"
-                " VALUES (" + ",".join("?" * 34) + ")",
+                " VALUES (" + ",".join("?" * 36) + ")",
                 (
                     snapshot_id,
                     listing.listing_id,
@@ -98,7 +105,9 @@ class Database:
                     listing.sqft,
                     listing.lot_sqft,
                     listing.year_built,
-                    listing.garage.spaces if listing.garage else None,
+                    garage.spaces if garage else None,
+                    garage_attached,
+                    garage_tags_json,
                     listing.hoa.monthly_usd if listing.hoa else None,
                     listing.property_type.value if listing.property_type else None,
                     listing.duplex_scope.value,
@@ -137,7 +146,13 @@ class Database:
             sqft=row["sqft"],
             lot_sqft=row["lot_sqft"],
             year_built=row["year_built"],
-            garage=GarageInfo(spaces=row["garage_spaces"])
+            garage=GarageInfo(
+                spaces=row["garage_spaces"],
+                attached=None
+                if row["garage_attached"] is None
+                else bool(row["garage_attached"]),
+                tags=tuple(json.loads(row["garage_tags_json"] or "[]")),
+            )
             if row["garage_spaces"] is not None
             else None,
             hoa=HOA(monthly_usd=row["hoa_monthly"])
@@ -183,14 +198,27 @@ class Database:
         ]
 
     def upsert_sales(self, sales: list[Sale]) -> None:
+        # first_seen is intentionally excluded from the DO UPDATE SET clause: a
+        # conflict means this mls_number was already recorded, so the original
+        # discovery timestamp must survive re-upserts. Every other column is
+        # refreshed from the new data.
         now = datetime.now().isoformat(timespec="seconds")
         for sale in sales:
             self._conn.execute(
-                "INSERT OR REPLACE INTO sold_history (mls_number, address, city, zip,"
+                "INSERT INTO sold_history (mls_number, address, city, zip,"
                 " subdivision, lat, lon, list_price, sold_price, sold_date,"
                 " sold_price_per_sqft, sqft, beds, baths_full, year_built, lot_sqft,"
                 " property_type, first_seen)"
-                " VALUES (" + ",".join("?" * 18) + ")",
+                " VALUES (" + ",".join("?" * 18) + ")"
+                " ON CONFLICT(mls_number) DO UPDATE SET"
+                " address=excluded.address, city=excluded.city, zip=excluded.zip,"
+                " subdivision=excluded.subdivision, lat=excluded.lat, lon=excluded.lon,"
+                " list_price=excluded.list_price, sold_price=excluded.sold_price,"
+                " sold_date=excluded.sold_date,"
+                " sold_price_per_sqft=excluded.sold_price_per_sqft, sqft=excluded.sqft,"
+                " beds=excluded.beds, baths_full=excluded.baths_full,"
+                " year_built=excluded.year_built, lot_sqft=excluded.lot_sqft,"
+                " property_type=excluded.property_type",
                 (
                     sale.mls_number,
                     sale.address,

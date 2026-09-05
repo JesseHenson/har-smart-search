@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS listings (
   price INTEGER, price_per_sqft REAL,
   beds INTEGER, baths_full INTEGER, baths_half INTEGER,
   sqft INTEGER, lot_sqft INTEGER, year_built INTEGER,
-  garage_spaces INTEGER, hoa_monthly REAL,
+  garage_spaces INTEGER, garage_attached INTEGER, garage_tags_json TEXT, hoa_monthly REAL,
   property_type TEXT, duplex_scope TEXT, status TEXT, days_on_market INTEGER,
   school_rating REAL, tax_rate REAL,
   appraisal_low INTEGER, appraisal_high INTEGER,
