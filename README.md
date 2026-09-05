@@ -74,7 +74,9 @@ Grouped so they can be walked through quickly on the call.
 
 ### Data and access
 
-- **How do you want us to get HAR data — and what access do you already have?** Is there an MLS membership, IDX feed, broker credentials, or an API arrangement we can work through, or are we expected to read the public site? This is the single biggest fork in the project: it drives legality, data depth, refresh rate, and cost.
+- **Do you have Repliers access through your HAR membership, and what does it cost you?** This is now the decisive question, and it is sharper than it was when this document was written. HAR licenses its data exclusively through Repliers, whose production API starts at **$199/month**. Their free preview tier serves *sample* data, not the Houston market, so it cannot drive a real search. The partnership announcement says HAR adds its proprietary datasets to Repliers "at no cost to subscribers" — but that is about the datasets, not about API access, so the subscription question is genuinely open.
+
+  For comparison, the managed-scraper path the tool ships with today costs roughly **$20–50/month** and returns real Spring listings. So switching to the licensed feed is a four-to-tenfold cost increase, bought with completeness, real-time freshness and zero terms-of-use exposure. That is a judgement only you can make, and the answer decides which adapter we finish.
 - **Do you need sold/closed prices, or are active asking prices enough?** Real comps normally lean on recent *sold* data. If that's not accessible, the KPI measures "priced vs. the neighbors' asking prices," which is a different and weaker claim.
 - **How fresh does the data need to be?** Live on every query, refreshed nightly, or refreshed weekly ahead of your scan?
 - **Are school ratings sourced from HAR, or should we pull a third-party rating?** Third-party ratings carry their own licensing.
