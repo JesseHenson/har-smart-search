@@ -46,10 +46,13 @@ def run_search(
     today = today or date.today()
 
     # 1. Sold history first, so comps are available for this run's listings.
+    sales: list = []
     for raw in source.fetch_sold(area=criteria.area):
         sale = normalize_sale(raw)
         if sale is not None:
-            db.upsert_sales([sale])
+            sales.append(sale)
+    if sales:
+        db.upsert_sales(sales)
 
     # 2. For-sale rows, normalized with every exclusion counted.
     exclusions: Counter[str] = Counter()
@@ -76,6 +79,8 @@ def run_search(
     # 4. Value each survivor against accumulated sold history.
     since = today - timedelta(days=COMP_LOOKBACK_DAYS)
     valuations: dict[str, Valuation] = {}
+    # Build the active comp pool once; comps_from_listings handles subject exclusion.
+    all_listings = [s.listing for s in scored]
     for item in scored:
         listing = item.listing
         sales = (
@@ -83,8 +88,7 @@ def run_search(
             if listing.lat is not None and listing.lon is not None
             else []
         )
-        others = [s.listing for s in scored if s.listing.listing_id != listing.listing_id]
-        valuations[listing.listing_id] = value_listing(listing, sales, others, today)
+        valuations[listing.listing_id] = value_listing(listing, sales, all_listings, today)
 
     # 5. Persist.
     snapshot_id = db.create_snapshot(
