@@ -38,9 +38,14 @@ def test_key_is_stable_across_list_and_dict_ordering():
 
 
 def test_key_ignores_surrounding_whitespace_and_case_in_the_area():
-    assert snapshot_key(Criteria(area=" spring ")).endswith(
-        snapshot_key(Criteria(area="Spring")).split("#")[1]
-    )
+    """Same criteria under different casing/whitespace must land in the same
+    bucket. Comparing only the hash suffix would pass even if the display
+    half ('Spring' vs 'spring' vs 'SPRING') split the searches into separate
+    buckets — the whole key is what `whats_new` actually looks up by.
+    """
+    reference = snapshot_key(Criteria(area="Spring"))
+    assert snapshot_key(Criteria(area=" spring ")) == reference
+    assert snapshot_key(Criteria(area="SPRING")) == reference
 
 
 def test_key_still_reads_as_a_place_name():

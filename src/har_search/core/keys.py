@@ -53,10 +53,25 @@ def criteria_digest(criteria: Criteria) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:KEY_HASH_LENGTH]
 
 
+def _display_area(area: str | None) -> str:
+    """The human-readable half of the key, normalized so that capitalization
+    and surrounding whitespace cannot split one search into several buckets.
+
+    The digest already folds the area to lowercase for comparison, so this is
+    purely cosmetic — but 'Spring', ' spring ', and 'SPRING' must render as the
+    same bucket, not three. Title-casing reads well for place names ("spring
+    branch" -> "Spring Branch") without mangling a ZIP code, which has no
+    letters for `.title()` to touch.
+    """
+    stripped = (area or "").strip()
+    if not stripped:
+        return "search"
+    return stripped.title()
+
+
 def snapshot_key(criteria: Criteria) -> str:
     """The saved-search key a run's snapshot is filed under."""
-    area = (criteria.area or "").strip() or "search"
-    return f"{area} {KEY_SEPARATOR}{criteria_digest(criteria)}"
+    return f"{_display_area(criteria.area)} {KEY_SEPARATOR}{criteria_digest(criteria)}"
 
 
 def resolve_saved_search(name: str, known_keys: list[str]) -> tuple[str | None, str | None]:
