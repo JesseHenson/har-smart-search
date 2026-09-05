@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>What changed</h1>
+<p class="muted"><a href="/run/{{ snapshot_id }}">back to results</a></p>
+{% if not has_previous %}
+<p>Only one run so far. Run this search again later to see what changed.</p>
+{% else %}
+<table>
+  <tr><th>Change</th><th>Address</th><th>Was</th><th>Now</th></tr>
+  {% for c in changes %}
+  <tr>
+    <td>{{ c.change_type }}</td>
+    <td>{{ c.address }}</td>
+    <td>{% if c.old_price %}${{ "{:,}".format(c.old_price) }}{% else %}—{% endif %}</td>
+    <td>{% if c.new_price %}${{ "{:,}".format(c.new_price) }}{% else %}—{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

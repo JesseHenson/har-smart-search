@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block body %}
+{% set l = row.listing %}
+<h1>{{ l.address }}</h1>
+<p class="muted">{{ l.subdivision or "" }} · <a href="/run/{{ snapshot_id }}">back to results</a></p>
+
+<h2>Why this appeared</h2>
+<p>{{ row.why }}</p>
+<table>
+  <tr><th>Criterion</th><th>Score</th><th>Detail</th></tr>
+  {% for p in row.params %}
+  <tr>
+    <td>{{ p.name }}</td>
+    <td>{% if p.known %}<div class="bar"><span style="width: {{ (p.score * 100)|round }}%"></span></div>{% else %}<span class="muted">unknown</span>{% endif %}</td>
+    <td class="muted">{{ p.detail }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Valuation</h2>
+<p>
+  <span class="chip {{ row.chip[1] }}">{{ row.chip[0] }}</span>
+</p>
+<table>
+  <tr><th>Source</th><th>Value</th><th>Evidence</th></tr>
+  <tr>
+    <td>Comparable sales</td>
+    <td>{% if row.valuation.comp_estimate %}${{ "{:,}".format(row.valuation.comp_estimate) }}{% else %}Not enough comps{% endif %}</td>
+    <td class="muted">{{ row.valuation.comp_count }} comps, {{ row.valuation.comp_basis }}, {{ row.valuation.confidence }} confidence</td>
+  </tr>
+  {% if row.valuation.appraisal_district %}
+  <tr>
+    <td>Appraisal district</td>
+    <td>${{ "{:,}".format(row.valuation.appraisal_district.low) }}–${{ "{:,}".format(row.valuation.appraisal_district.high) }}</td>
+    <td class="muted">county assessment, lags the market</td>
+  </tr>
+  {% endif %}
+  {% if row.valuation.subdivision_list_to_sold %}
+  <tr>
+    <td>Subdivision list-to-sold</td>
+    <td>{{ "%.1f"|format(row.valuation.subdivision_list_to_sold * 100) }}%</td>
+    <td class="muted">median of closed sales nearby</td>
+  </tr>
+  {% endif %}
+</table>
+<p class="muted">Sources {{ row.valuation.spread_flag }}.</p>
+{% endblock %}

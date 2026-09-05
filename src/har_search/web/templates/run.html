@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Results — {{ snapshot.saved_search }}</h1>
+<p class="muted">
+  Run {{ snapshot.run_at }} · {{ snapshot.item_count }} results ·
+  <a href="/run/{{ snapshot_id }}/diff">what changed</a>
+</p>
+<table>
+  <tr>
+    <th>Address</th><th>Price</th><th>$/sqft</th><th>Bd/Ba</th>
+    <th>Match</th><th>Coverage</th><th>Value KPI</th><th>DOM</th>
+  </tr>
+  {% for row in rows %}
+  {% set l = row.listing %}
+  <tr>
+    <td><a href="/run/{{ snapshot_id }}/listing/{{ l.listing_id }}">{{ l.address }}</a>
+        <div class="muted">{{ l.subdivision or "" }}</div></td>
+    <td>{% if l.price %}${{ "{:,}".format(l.price) }}{% else %}—{% endif %}</td>
+    <td>{% if l.price_per_sqft %}${{ "%.0f"|format(l.price_per_sqft) }}{% else %}—{% endif %}</td>
+    <td>{{ l.beds if l.beds is not none else "?" }}/{{ l.baths_full if l.baths_full is not none else "?" }}</td>
+    <td><div class="bar"><span style="width: {{ (row.score * 100)|round }}%"></span></div>
+        <span class="muted">{{ "%.2f"|format(row.score) }}</span></td>
+    <td class="muted">{{ (row.coverage * 100)|round|int }}%</td>
+    <td>
+      <span class="chip {{ row.chip[1] }}">{{ row.chip[0] }}</span>
+      {% if row.valuation.comp_estimate %}
+      <div class="muted">${{ "{:,}".format(row.valuation.comp_estimate) }}, {{ row.valuation.comp_count }} comps</div>
+      {% endif %}
+    </td>
+    <td class="muted">{{ l.days_on_market if l.days_on_market is not none else "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="muted">
+  {{ snapshot.excluded_count }} rows excluded for data quality
+  {% if snapshot.exclusions_json %}— {{ snapshot.exclusions_json }}{% endif %}
+</p>
+{% endblock %}
