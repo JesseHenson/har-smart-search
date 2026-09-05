@@ -1,0 +1,210 @@
+[Mohammad Hamzah] 12:01:56
+Okay, so what we need to do is create…
+
+[Mohammad Hamzah] 12:02:01
+a smart…
+
+[Mohammad Hamzah] 12:02:03
+filter…
+
+[Mohammad Hamzah] 12:02:06
+based on…
+
+[Mohammad Hamzah] 12:02:08
+The HAR website, so the input would be all the information that is available on the HAR website.
+
+[Mohammad Hamzah] 12:02:15
+So a user wants to find a property.
+
+[Mohammad Hamzah] 12:02:20
+So, they want to be able to scrape the website, and they want to be able to tell
+
+[Mohammad Hamzah] 12:02:26
+some, you know, more or less parameters, and then get a set of results.
+
+[Mohammad Hamzah] 12:02:33
+Which would be a snapshot in time.
+
+[Mohammad Hamzah] 12:02:37
+of…
+
+[Mohammad Hamzah] 12:02:39
+possible similarities, so…
+
+[Mohammad Hamzah] 12:02:41
+So, on a simple scale, it would work like a filter, but on a more complex way,
+
+[Mohammad Hamzah] 12:02:47
+It would probably work like a similarity finder.
+
+[Mohammad Hamzah] 12:02:51
+Uh, for what you see. So, for example, uh, example, I want to find…
+
+[Mohammad Hamzah] 12:02:56
+a 3-bedroom house
+
+[Mohammad Hamzah] 12:02:59
+Uh, in…
+
+[Mohammad Hamzah] 12:03:01
+a certain area…
+
+[Mohammad Hamzah] 12:03:03
+you know, a certain general area,
+
+[Mohammad Hamzah] 12:03:07
+certain amount of square foot, so let's… let's give a real example. So, 3-bedroom house, 2 baths,
+
+[Mohammad Hamzah] 12:03:12
+One car garage,
+
+[Mohammad Hamzah] 12:03:16
+in spring…
+
+[Mohammad Hamzah] 12:03:19
+Uh, for…
+
+[Mohammad Hamzah] 12:03:23
+$120 per square foot.
+
+[Mohammad Hamzah] 12:03:28
+And, you know, I can specify things like it should be a duplex, or half of a duplex, or a whole duplex.
+
+[Mohammad Hamzah] 12:03:35
+And I can specify things like…
+
+[Mohammad Hamzah] 12:03:38
+I'm interested in no HOA, or…
+
+[Mohammad Hamzah] 12:03:40
+or so on. And then the system would run a check and give you an answer. So that's…
+
+[Mohammad Hamzah] 12:03:45
+That's easy, that's a… that's a quick filter. But then…
+
+[Mohammad Hamzah] 12:03:49
+But then, what we want to do is we want to be able to ask some complicated things of the system.
+
+[Mohammad Hamzah] 12:03:55
+We want to be able to say, do a comparison,
+
+[Mohammad Hamzah] 12:03:58
+of the…
+
+[Mohammad Hamzah] 12:04:01
+prices, so take this price.
+
+[Mohammad Hamzah] 12:04:03
+And look within a certain radius,
+
+[Mohammad Hamzah] 12:04:06
+And give me a comparison of the prices. So I want to be able, using the HAR website alone,
+
+[Mohammad Hamzah] 12:04:14
+do a relative comps,
+
+[Mohammad Hamzah] 12:04:16
+you know, a comparison of a nearby homes, and tell me what is the value of this…
+
+[Mohammad Hamzah] 12:04:22
+home. So for each output that I get,
+
+[Mohammad Hamzah] 12:04:25
+I want to know what is the value of the house, so…
+
+[Mohammad Hamzah] 12:04:30
+How… how does it compare to the houses? So, for example, you gave… it gives me 5 houses for each house.
+
+[Mohammad Hamzah] 12:04:36
+I want to know, okay, so I'm paying, for example, $250 for that house.
+
+[Mohammad Hamzah] 12:04:42
+However, nearby houses, you know, very similar.
+
+[Mohammad Hamzah] 12:04:47
+are going to go for, uh, maybe 20,000 more, or 20,000 less, or whatever.
+
+[Mohammad Hamzah] 12:04:54
+I want to see that as sort of a KPI.
+
+[Mohammad Hamzah] 12:04:57
+Like, as in, uh, key performance indicator that I'm going to use to validate if my search is good, or maybe just…
+
+[Mohammad Hamzah] 12:05:06
+uh, prioritize what are the things that I find.
+
+[Mohammad Hamzah] 12:05:09
+But on the inside, I want to be able to not just do a filter, right? I want to do some sort of…
+
+[Mohammad Hamzah] 12:05:15
+dynamic, uh, similarity finder. So when I say I want a 3-bedroom house,
+
+[Mohammad Hamzah] 12:05:23
+If all of the other parameters fit in another house, you might be able to show me a 4-bedroom house,
+
+[Mohammad Hamzah] 12:05:28
+But in the same price range, in the same area, with the same number of bathrooms,
+
+[Mohammad Hamzah] 12:05:35
+But you'll include that 4-bedroom house because you're not just doing a filter, you're actually doing a similarity finder.
+
+[Mohammad Hamzah] 12:05:42
+And with all the parameters that I've given. So if I give 6 parameters or 7 parameters, or 2 parameters,
+
+[Mohammad Hamzah] 12:05:48
+If I just say, show me all 3-bedroom houses,
+
+[Mohammad Hamzah] 12:05:52
+Uh, that are under $200,000.
+
+[Mohammad Hamzah] 12:05:55
+Right? Then you may show me…
+
+[Mohammad Hamzah] 12:05:59
+Some houses above $200,000, if…
+
+[Mohammad Hamzah] 12:06:03
+The search result is not there for below 2,000.
+
+[Mohammad Hamzah] 12:06:06
+But it's sort of mixing…
+
+[Mohammad Hamzah] 12:06:09
+Uh, the two things that I'm asking for, and showing me that as a result, like, as a… show me all the similar things,
+
+[Mohammad Hamzah] 12:06:15
+But the parameters are variable, right? And then what you can do is you can then have, like, if I give you 6 parameters, like, if I also told you
+
+[Mohammad Hamzah] 12:06:22
+Number of bots, number of garages, square footage,
+
+[Mohammad Hamzah] 12:06:25
+age of the house, you know, uh…
+
+[Mohammad Hamzah] 12:06:29
+Nearby school rating,
+
+[Mohammad Hamzah] 12:06:31
+then you also give that as sort of a number, right?
+
+[Mohammad Hamzah] 12:06:36
+Um, so that's the first step, is just building a filter.
+
+[Mohammad Hamzah] 12:06:40
+So that at any given day, I can run that software, and I can say, hey, uh, look, these are the parameters for my next investment,
+
+[Mohammad Hamzah] 12:06:48
+So, every week I can run that, say, show me all the investments, everything that's come up, right?
+
+[Mohammad Hamzah] 12:06:53
+So that's… that would be step one. Um, once we get that running, maybe there can be things that we would like to start to…
+
+[Mohammad Hamzah] 12:07:01
+to add, right? Um, but if we could get that running, that would be…
+
+[Mohammad Hamzah] 12:07:06
+That would be a super, a super tool, just…
+
+[Mohammad Hamzah] 12:07:08
+As the first, you know, the first piece of the puzzle.
+
