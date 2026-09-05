@@ -1,0 +1,17 @@
+# Build and dev cruft — never ship these inside the bundle.
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.superpowers/
+.git/
+*.db
+
+# Repository material the runtime does not need.
+tests/
+docs/
+scripts/
+*.md
+!BUNDLE.md
+meeting_saved_closed_caption.txt
+uv.lock
