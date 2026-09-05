@@ -2,7 +2,7 @@ from datetime import date
 
 from starlette.testclient import TestClient
 
-from har_search.core.models import Listing, ScoredListing, Valuation
+from har_search.core.models import Listing, ParamScore, ScoredListing, Valuation
 from har_search.store.db import Database
 from har_search.web.app import create_app, kpi_chip
 
@@ -32,9 +32,18 @@ def seed(tmp_path) -> tuple[object, int]:
         lat=30.036,
         lon=-95.342,
     )
+    # A mix of known and unknown criteria, matching the shape get_scored_rows
+    # actually returns (dicts with name/score/weight/known/detail), so the
+    # per-criterion breakdown loop in listing.html exercises both branches
+    # under test instead of never running (params=[] would skip the loop
+    # entirely and leave that render path untested).
+    params = [
+        ParamScore(name="beds", score=1.0, weight=0.3, known=True, detail="3 beds matches request"),
+        ParamScore(name="garage", score=0.0, weight=0.2, known=False, detail="garage data not available"),
+    ]
     db.insert_scored(
         snapshot_id,
-        [ScoredListing(listing, 0.91, 0.85, [], "Matches every requested criterion.")],
+        [ScoredListing(listing, 0.91, 0.85, params, "Matches every requested criterion.")],
         {"L1": Valuation(comp_estimate=231_000, comp_count=6, confidence="medium", delta_pct=-0.069)},
     )
     return path, snapshot_id
@@ -96,3 +105,41 @@ def test_index_lists_saved_searches(tmp_path):
     response = client.get("/")
     assert response.status_code == 200
     assert "spring" in response.text
+
+
+def test_index_reports_the_latest_runs_item_count_not_the_historical_max(tmp_path):
+    """A per-column MAX() aggregate would report the largest item_count ever
+    seen for a saved search, not the current one. Seed a second, later run
+    with a SMALLER item_count and confirm the index shows that smaller,
+    current number rather than the stale larger one.
+    """
+    path, _ = seed(tmp_path)
+    db = Database(path)
+    db.create_snapshot("spring", "fixture", 40, 0, {})
+    db.create_snapshot("spring", "fixture", 12, 0, {})
+    client = TestClient(create_app(lambda: Database(path)))
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "12" in response.text
+    assert "40" not in response.text
+
+
+def test_run_page_shows_criteria_counts_next_to_coverage(tmp_path):
+    client, snapshot_id = client_for(tmp_path)
+    response = client.get(f"/run/{snapshot_id}")
+    assert response.status_code == 200
+    assert "1 of 2 criteria" in response.text
+
+
+def test_listing_page_shows_known_and_unknown_criteria(tmp_path):
+    client, snapshot_id = client_for(tmp_path)
+    response = client.get(f"/run/{snapshot_id}/listing/L1")
+    assert response.status_code == 200
+    text = response.text
+    assert "beds" in text.lower()
+    assert "garage" in text.lower()
+    # The unknown criterion must render as "unknown", not as a 0% score bar.
+    assert "unknown" in text.lower()
+    garage_row_start = text.lower().index("garage")
+    garage_row = text[garage_row_start : garage_row_start + 200]
+    assert "unknown" in garage_row.lower()

@@ -102,6 +102,47 @@ def test_sales_near_filters_by_distance_and_recency(tmp_path):
     assert {s.mls_number for s in found} == {"NEAR"}
 
 
+def test_latest_snapshots_reports_the_newest_runs_item_count(tmp_path):
+    """id/run_at rise together with insertion order, but item_count does not:
+    a later run can legitimately return fewer results than an earlier one.
+
+    Seed a later snapshot with a SMALLER item_count than the earlier one and
+    assert latest_snapshots() reports the later run's count.
+
+    Against a naive `SELECT saved_search, MAX(id), MAX(run_at),
+    MAX(item_count) ... GROUP BY saved_search` query (the old, wrong query
+    this replaces) this assertion fails: that query would independently
+    aggregate MAX(item_count) across both rows and report 40, the
+    historical max, not 12, the current count. It only passes against the
+    corrected `WHERE id IN (SELECT MAX(id) FROM snapshots GROUP BY
+    saved_search)` query, which selects the whole row belonging to the
+    newest id.
+    """
+    db = make_db(tmp_path)
+    db.create_snapshot("spring", "apify_memo23", 40, 0, {})
+    later_id = db.create_snapshot("spring", "apify_memo23", 12, 0, {})
+
+    rows = {row["saved_search"]: row for row in db.latest_snapshots()}
+
+    assert rows["spring"]["id"] == later_id
+    assert rows["spring"]["item_count"] == 12
+
+
+def test_get_snapshot_returns_row_or_none(tmp_path):
+    db = make_db(tmp_path)
+    snapshot_id = db.create_snapshot("spring", "apify_memo23", 1, 0, {})
+    assert db.get_snapshot(snapshot_id)["saved_search"] == "spring"
+    assert db.get_snapshot(snapshot_id + 999) is None
+
+
+def test_previous_snapshot_id_finds_the_immediately_prior_run(tmp_path):
+    db = make_db(tmp_path)
+    first = db.create_snapshot("spring", "apify_memo23", 1, 0, {})
+    second = db.create_snapshot("spring", "apify_memo23", 2, 0, {})
+    assert db.previous_snapshot_id("spring", second) == first
+    assert db.previous_snapshot_id("spring", first) is None
+
+
 def test_recent_snapshots_returns_newest_first(tmp_path):
     db = make_db(tmp_path)
     first = db.create_snapshot("s", "apify_memo23", 1, 0, {})

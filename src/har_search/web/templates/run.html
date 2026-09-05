@@ -20,7 +20,7 @@
     <td>{{ l.beds if l.beds is not none else "?" }}/{{ l.baths_full if l.baths_full is not none else "?" }}</td>
     <td><div class="bar"><span style="width: {{ (row.score * 100)|round }}%"></span></div>
         <span class="muted">{{ "%.2f"|format(row.score) }}</span></td>
-    <td class="muted">{{ (row.coverage * 100)|round|int }}%</td>
+    <td class="muted">{{ (row.coverage * 100)|round|int }}% ({{ row.criteria_known }} of {{ row.criteria_total }} criteria)</td>
     <td>
       <span class="chip {{ row.chip[1] }}">{{ row.chip[0] }}</span>
       {% if row.valuation.comp_estimate %}

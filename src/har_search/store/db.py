@@ -292,6 +292,33 @@ class Database:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_snapshot(self, snapshot_id: int) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM snapshots WHERE id = ?", (snapshot_id,)
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def latest_snapshots(self) -> list[dict]:
+        # id, run_at and item_count are correlated by insertion order EXCEPT
+        # item_count, which can legitimately shrink between runs. Selecting
+        # the whole row for the newest id per saved_search (rather than
+        # aggregating each column independently with MAX()) is what makes
+        # item_count reflect the latest run instead of the historical max.
+        rows = self._conn.execute(
+            "SELECT * FROM snapshots WHERE id IN"
+            " (SELECT MAX(id) FROM snapshots GROUP BY saved_search)"
+            " ORDER BY saved_search"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def previous_snapshot_id(self, saved_search: str, before_id: int) -> int | None:
+        row = self._conn.execute(
+            "SELECT id FROM snapshots WHERE saved_search = ? AND id < ?"
+            " ORDER BY id DESC LIMIT 1",
+            (saved_search, before_id),
+        ).fetchone()
+        return int(row["id"]) if row is not None else None
+
 
 def _valuation_to_json(valuation: Valuation) -> dict:
     data = asdict(valuation)

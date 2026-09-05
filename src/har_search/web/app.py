@@ -20,6 +20,7 @@ from har_search.core.diff import diff_snapshots
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 _server_thread: threading.Thread | None = None
+_server_lock = threading.Lock()
 
 
 def kpi_chip(delta_pct: float | None) -> tuple[str, str]:
@@ -34,32 +35,41 @@ def kpi_chip(delta_pct: float | None) -> tuple[str, str]:
     return ("At comps", "neutral")
 
 
+def criteria_counts(params: list[dict]) -> tuple[int, int]:
+    """Return (known, total) criteria counts backing a coverage percentage.
+
+    A bare percentage doesn't say what it's a fraction of: 92% computed from
+    3 of 7 requested criteria is a different claim than 92% from all 7.
+    """
+    total = len(params)
+    known = sum(1 for p in params if p.get("known"))
+    return known, total
+
+
 def create_app(db_factory) -> Starlette:
     def index(request):
         db = db_factory()
-        rows = db._conn.execute(
-            "SELECT saved_search, MAX(id) AS id, MAX(run_at) AS run_at,"
-            " MAX(item_count) AS item_count FROM snapshots GROUP BY saved_search"
-        ).fetchall()
+        searches = db.latest_snapshots()
         return TEMPLATES.TemplateResponse(
-            request, "index.html", {"searches": [dict(r) for r in rows]}
+            request, "index.html", {"searches": searches}
         )
 
     def run_page(request):
         db = db_factory()
         snapshot_id = int(request.path_params["snapshot_id"])
-        snapshot = db._conn.execute(
-            "SELECT * FROM snapshots WHERE id = ?", (snapshot_id,)
-        ).fetchone()
+        snapshot = db.get_snapshot(snapshot_id)
         if snapshot is None:
             raise HTTPException(status_code=404, detail="No such snapshot")
         rows = db.get_scored_rows(snapshot_id)
         for row in rows:
             row["chip"] = kpi_chip(row["valuation"].get("delta_pct"))
+            known, total = criteria_counts(row["params"])
+            row["criteria_known"] = known
+            row["criteria_total"] = total
         return TEMPLATES.TemplateResponse(
             request,
             "run.html",
-            {"snapshot": dict(snapshot), "rows": rows, "snapshot_id": snapshot_id},
+            {"snapshot": snapshot, "rows": rows, "snapshot_id": snapshot_id},
         )
 
     def listing_page(request):
@@ -78,26 +88,18 @@ def create_app(db_factory) -> Starlette:
     def diff_page(request):
         db = db_factory()
         snapshot_id = int(request.path_params["snapshot_id"])
-        snapshot = db._conn.execute(
-            "SELECT * FROM snapshots WHERE id = ?", (snapshot_id,)
-        ).fetchone()
+        snapshot = db.get_snapshot(snapshot_id)
         if snapshot is None:
             raise HTTPException(status_code=404, detail="No such snapshot")
-        previous_row = db._conn.execute(
-            "SELECT id FROM snapshots WHERE saved_search = ? AND id < ?"
-            " ORDER BY id DESC LIMIT 1",
-            (snapshot["saved_search"], snapshot_id),
-        ).fetchone()
-        previous = (
-            db.get_snapshot_listings(previous_row["id"]) if previous_row else []
-        )
+        previous_id = db.previous_snapshot_id(snapshot["saved_search"], snapshot_id)
+        previous = db.get_snapshot_listings(previous_id) if previous_id else []
         changes = diff_snapshots(previous, db.get_snapshot_listings(snapshot_id))
         return TEMPLATES.TemplateResponse(
             request,
             "diff.html",
             {
                 "changes": [c for c in changes if c.change_type != "UNCHANGED"],
-                "has_previous": previous_row is not None,
+                "has_previous": previous_id is not None,
                 "snapshot_id": snapshot_id,
             },
         )
@@ -113,27 +115,36 @@ def create_app(db_factory) -> Starlette:
 
 
 def ensure_dashboard_running(port: int) -> str:
-    """Start the dashboard in a background thread, once."""
+    """Start the dashboard in a background thread, once.
+
+    The check-and-set (is a server already running? if not, start one) has
+    to be atomic: Task 12 calls this from both its `search` and
+    `open_dashboard` tools, and two threads racing the check would both see
+    no live server and both try to bind the port. The lock makes the whole
+    check-and-start one critical section; the fast path (server already
+    running) still just acquires an uncontended lock and returns.
+    """
     global _server_thread
     base = f"http://127.0.0.1:{port}"
-    if _server_thread is not None and _server_thread.is_alive():
+    with _server_lock:
+        if _server_thread is not None and _server_thread.is_alive():
+            return base
+
+        import uvicorn
+
+        from har_search import config
+        from har_search.store.db import Database
+
+        def factory():
+            db = Database(config.database_path())
+            db.init_schema()
+            return db
+
+        app = create_app(factory)
+
+        def serve():
+            uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+
+        _server_thread = threading.Thread(target=serve, daemon=True)
+        _server_thread.start()
         return base
-
-    import uvicorn
-
-    from har_search import config
-    from har_search.store.db import Database
-
-    def factory():
-        db = Database(config.database_path())
-        db.init_schema()
-        return db
-
-    app = create_app(factory)
-
-    def serve():
-        uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
-
-    _server_thread = threading.Thread(target=serve, daemon=True)
-    _server_thread.start()
-    return base
