@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Saved searches</h1>
+<table>
+  <tr><th>Search</th><th>Last run</th><th>Results</th></tr>
+  {% for s in searches %}
+  <tr>
+    <td><a href="/run/{{ s.id }}">{{ s.saved_search }}</a></td>
+    <td>{{ s.run_at }}</td>
+    <td>{{ s.item_count }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

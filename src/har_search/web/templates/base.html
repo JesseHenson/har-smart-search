@@ -1,0 +1,19 @@
+<!doctype html>
+<title>{% block title %}HAR Smart Search{% endblock %}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 24px; }
+  h1, h2 { margin: 0 0 12px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #8883; }
+  th { font-weight: 600; font-size: 12px; text-transform: uppercase; opacity: .7; }
+  .chip { padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+  .good { background: #16a34a22; color: #16a34a; }
+  .bad { background: #dc262622; color: #dc2626; }
+  .neutral { background: #8881; opacity: .8; }
+  .bar { height: 6px; background: #8883; border-radius: 3px; width: 90px; }
+  .bar > span { display: block; height: 100%; background: #2563eb; border-radius: 3px; }
+  .muted { opacity: .65; font-size: 12px; }
+  a { color: inherit; }
+</style>
+<body>{% block body %}{% endblock %}</body>
