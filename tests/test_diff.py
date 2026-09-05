@@ -50,3 +50,41 @@ def test_missing_price_does_not_produce_a_false_change():
     previous = [listing("A", None)]
     current = [listing("A", None)]
     assert by_type(diff_snapshots(previous, current)) == {"A": "UNCHANGED"}
+
+
+def test_none_to_price_transition_is_unchanged():
+    """Previous snapshot has no price; current has a real price.
+
+    Should classify as UNCHANGED because None means unknown, not zero.
+    If missing prices were incorrectly coerced to 0, this would falsely
+    become PRICE_UP (0 → 200_000).
+    """
+    previous = [listing("A", None, "5519 Lynngate Dr")]
+    current = [listing("A", 200_000, "5519 Lynngate Dr")]
+    changes = diff_snapshots(previous, current)
+    assert by_type(changes) == {"A": "UNCHANGED"}
+
+    # Verify the change carries both prices as given
+    change = changes[0]
+    assert change.old_price is None
+    assert change.new_price == 200_000
+    assert change.address == "5519 Lynngate Dr"
+
+
+def test_price_to_none_transition_is_unchanged():
+    """Previous snapshot has a real price; current has no price.
+
+    Should classify as UNCHANGED because None means unknown, not zero.
+    If missing prices were incorrectly coerced to 0, this would falsely
+    become PRICE_CUT (200_000 → 0).
+    """
+    previous = [listing("A", 200_000, "5519 Lynngate Dr")]
+    current = [listing("A", None, "5519 Lynngate Dr")]
+    changes = diff_snapshots(previous, current)
+    assert by_type(changes) == {"A": "UNCHANGED"}
+
+    # Verify the change carries both prices as given
+    change = changes[0]
+    assert change.old_price == 200_000
+    assert change.new_price is None
+    assert change.address == "5519 Lynngate Dr"
