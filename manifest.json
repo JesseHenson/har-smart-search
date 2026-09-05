@@ -1,0 +1,42 @@
+{
+  "manifest_version": "0.1",
+  "name": "har-smart-search",
+  "display_name": "HAR Smart Search",
+  "version": "0.1.0",
+  "description": "Similarity search and comparable-sales valuation over HAR listings.",
+  "author": { "name": "Jesse Henson" },
+  "server": {
+    "type": "python",
+    "entry_point": "src/har_search/server/__main__.py",
+    "mcp_config": {
+      "command": "python",
+      "args": ["${__dirname}/src/har_search/server/__main__.py"],
+      "env": {
+        "PYTHONPATH": "${__dirname}/src:${__dirname}/lib",
+        "HAR_APIFY_TOKEN": "${user_config.apify_token}",
+        "HAR_DASHBOARD_PORT": "${user_config.dashboard_port}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "search", "description": "Search HAR listings by loose criteria and rank by similarity." },
+    { "name": "explain", "description": "Show the similarity breakdown and comparable sales for one listing." },
+    { "name": "whats_new", "description": "Compare the two most recent runs of a saved search." },
+    { "name": "open_dashboard", "description": "Return the local dashboard URL." }
+  ],
+  "user_config": {
+    "apify_token": {
+      "type": "string",
+      "title": "Apify API token",
+      "description": "Used to fetch HAR listing data. Stored locally, never shared.",
+      "sensitive": true,
+      "required": true
+    },
+    "dashboard_port": {
+      "type": "number",
+      "title": "Dashboard port",
+      "default": 7788,
+      "required": false
+    }
+  }
+}

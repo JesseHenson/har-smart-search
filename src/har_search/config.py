@@ -15,10 +15,6 @@ def apify_token() -> str:
     return token
 
 
-def default_area() -> str:
-    return os.environ.get("HAR_DEFAULT_AREA", "Spring")
-
-
 def dashboard_port() -> int:
     return int(os.environ.get("HAR_DASHBOARD_PORT", "7788"))
 
