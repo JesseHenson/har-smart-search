@@ -55,5 +55,13 @@
       "default": 7788,
       "required": false
     }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin"
+    ],
+    "runtimes": {
+      "python": ">=3.12.0 <3.13"
+    }
   }
 }
