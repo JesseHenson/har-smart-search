@@ -142,3 +142,54 @@ def test_normalize_sale_rejects_rentals():
         "propertyType": "Single Family",
     }
     assert normalize_sale(raw) is None
+
+
+def test_normalize_sale_rejects_sold_price_below_floor():
+    """normalize_sale must reject soldPrice below floor, not just listing price."""
+    raw = {
+        "mlsNumber": "44444444",
+        "address": "Test Address",
+        "city": "Test City",
+        "zip": "12345",
+        "soldPrice": 1325,
+        "soldDate": "2026-08-27",
+        "propertyType": "Single-Family",
+        "status": "Sold",
+    }
+    assert normalize_sale(raw) is None
+
+
+def test_parse_date_handles_integer_input():
+    """_parse_date should gracefully degrade to None on non-string input like integers."""
+    raw = {
+        "mlsNumber": "55555555",
+        "address": "Test Address",
+        "city": "Test City",
+        "zip": "12345",
+        "soldPrice": 450000,
+        "soldDate": 20260827,  # Integer instead of string
+        "propertyType": "Single-Family",
+        "status": "Sold",
+    }
+    assert normalize_sale(raw) is None
+
+
+def test_negative_beds_normalizes_to_none():
+    """Negative bedroom count is invalid and should become None."""
+    row = dict(GOOD_ROW, beds=-1)
+    listing = normalize_listing(row).listing
+    assert listing.beds is None
+
+
+def test_zero_baths_half_is_preserved():
+    """Zero half-baths is a valid, common value and should be preserved."""
+    row = dict(GOOD_ROW, bathsHalf=0)
+    listing = normalize_listing(row).listing
+    assert listing.baths_half == 0
+
+
+def test_zero_days_on_market_is_preserved():
+    """Zero days on market (posted today) is valid and should be preserved."""
+    row = dict(GOOD_ROW, daysOnMarket=0)
+    listing = normalize_listing(row).listing
+    assert listing.days_on_market == 0

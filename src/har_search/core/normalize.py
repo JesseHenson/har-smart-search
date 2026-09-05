@@ -142,14 +142,24 @@ BEDS_PLAUSIBILITY_SQFT = 5_000
 
 
 def _positive_or_none(value) -> int | None:
-    """Zero from this vendor means 'not populated', never 'actually zero'."""
+    """Zero or negative from this vendor means 'not populated', never 'actually zero or negative'."""
     if value is None:
         return None
     try:
         number = int(value)
     except (TypeError, ValueError):
         return None
-    return number or None
+    return number if number > 0 else None
+
+
+def _int_or_none(value) -> int | None:
+    """Convert to int, preserving zero. Only None for None and non-numeric input."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _float_or_none(value) -> float | None:
@@ -180,7 +190,7 @@ def _parse_date(value: str | None) -> date | None:
         return None
     try:
         return datetime.strptime(value, "%Y-%m-%d").date()
-    except ValueError:
+    except (ValueError, TypeError):
         return None
 
 
@@ -217,7 +227,7 @@ def normalize_listing(raw: dict) -> NormalizeResult:
         price_per_sqft=_float_or_none(raw.get("pricePerSqft")),
         beds=beds,
         baths_full=_positive_or_none(raw.get("bathsFull")),
-        baths_half=_positive_or_none(raw.get("bathsHalf")),
+        baths_half=_int_or_none(raw.get("bathsHalf")),
         sqft=sqft,
         lot_sqft=parse_lot(raw.get("lotSize")),
         year_built=_positive_or_none(raw.get("yearBuilt")),
@@ -226,7 +236,7 @@ def normalize_listing(raw: dict) -> NormalizeResult:
         property_type=property_type,
         duplex_scope=parse_unit_designator(address),
         status=status,
-        days_on_market=_positive_or_none(raw.get("daysOnMarket")),
+        days_on_market=_int_or_none(raw.get("daysOnMarket")),
         school_rating=_school_rating(raw.get("schools")),
         tax_rate=_float_or_none((raw.get("taxInfo") or {}).get("tax_rate")),
         appraisal=parse_money_abbrev(raw.get("avmValue")),
