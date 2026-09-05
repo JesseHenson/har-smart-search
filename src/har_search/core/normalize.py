@@ -6,8 +6,9 @@ Contract: None means unknown. Unknown never becomes zero or a default.
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 
-from har_search.core.models import DuplexScope, GarageInfo, HOA, MoneyRange, PropertyType
+from har_search.core.models import DuplexScope, GarageInfo, HOA, Listing, MoneyRange, NormalizeResult, PropertyType, Sale
 
 SQFT_PER_ACRE = 43_560
 
@@ -133,3 +134,136 @@ def letter_to_score(letter: str | None) -> float | None:
     if not letter:
         return None
     return _LETTER_SCORES.get(letter.strip().upper())
+
+
+SALE_PRICE_FLOOR = 10_000
+MAX_PLAUSIBLE_BEDS = 8
+BEDS_PLAUSIBILITY_SQFT = 5_000
+
+
+def _positive_or_none(value) -> int | None:
+    """Zero from this vendor means 'not populated', never 'actually zero'."""
+    if value is None:
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number or None
+
+
+def _float_or_none(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _school_rating(schools: dict | None) -> float | None:
+    if not schools:
+        return None
+    scores = [
+        score
+        for level in ("E", "M", "S")
+        if (score := letter_to_score((schools.get(level) or {}).get("rating_letter")))
+        is not None
+    ]
+    if not scores:
+        return None
+    return sum(scores) / len(scores)
+
+
+def _parse_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def normalize_listing(raw: dict) -> NormalizeResult:
+    property_type, is_lease = canon_property_type(raw.get("propertyType"))
+    status = raw.get("status")
+
+    if is_lease or (status or "").strip().lower() == "rented":
+        return NormalizeResult(listing=None, exclusion="lease")
+
+    price = _positive_or_none(raw.get("price"))
+    if price is not None and price < SALE_PRICE_FLOOR:
+        return NormalizeResult(listing=None, exclusion="price_below_floor")
+
+    flags: list[str] = []
+    beds = _positive_or_none(raw.get("beds"))
+    sqft = _positive_or_none(raw.get("sqft"))
+    if beds is not None and beds > MAX_PLAUSIBLE_BEDS and (
+        sqft is None or sqft < BEDS_PLAUSIBILITY_SQFT
+    ):
+        beds = None
+        flags.append("suspect_beds")
+
+    address = raw.get("address")
+    listing = Listing(
+        listing_id=str(raw.get("listingId") or raw.get("harId") or raw.get("mlsNumber")),
+        address=address,
+        city=raw.get("city"),
+        zip=raw.get("zip"),
+        subdivision=raw.get("subdivision"),
+        lat=_float_or_none(raw.get("latitude")),
+        lon=_float_or_none(raw.get("longitude")),
+        price=price,
+        price_per_sqft=_float_or_none(raw.get("pricePerSqft")),
+        beds=beds,
+        baths_full=_positive_or_none(raw.get("bathsFull")),
+        baths_half=_positive_or_none(raw.get("bathsHalf")),
+        sqft=sqft,
+        lot_sqft=parse_lot(raw.get("lotSize")),
+        year_built=_positive_or_none(raw.get("yearBuilt")),
+        garage=parse_garage(raw.get("garage")),
+        hoa=parse_hoa(raw.get("maintenanceFee")),
+        property_type=property_type,
+        duplex_scope=parse_unit_designator(address),
+        status=status,
+        days_on_market=_positive_or_none(raw.get("daysOnMarket")),
+        school_rating=_school_rating(raw.get("schools")),
+        tax_rate=_float_or_none((raw.get("taxInfo") or {}).get("tax_rate")),
+        appraisal=parse_money_abbrev(raw.get("avmValue")),
+        mls_number=raw.get("mlsNumber"),
+        url=raw.get("url"),
+        flags=tuple(flags),
+        raw=raw,
+    )
+    return NormalizeResult(listing=listing, exclusion=None)
+
+
+def normalize_sale(raw: dict) -> Sale | None:
+    property_type, is_lease = canon_property_type(raw.get("propertyType"))
+    if is_lease or (raw.get("status") or "").strip().lower() == "rented":
+        return None
+
+    sold_price = _positive_or_none(raw.get("soldPrice"))
+    sold_date = _parse_date(raw.get("soldDate"))
+    if sold_price is None or sold_date is None or sold_price < SALE_PRICE_FLOOR:
+        return None
+
+    return Sale(
+        mls_number=str(raw.get("mlsNumber")),
+        sold_price=sold_price,
+        sold_date=sold_date,
+        address=raw.get("address"),
+        city=raw.get("city"),
+        zip=raw.get("zip"),
+        subdivision=raw.get("subdivision"),
+        lat=_float_or_none(raw.get("latitude")),
+        lon=_float_or_none(raw.get("longitude")),
+        list_price=_positive_or_none(raw.get("price")),
+        sold_price_per_sqft=_float_or_none(raw.get("soldPricePerSqft")),
+        sqft=_positive_or_none(raw.get("sqft")),
+        beds=_positive_or_none(raw.get("beds")),
+        baths_full=_positive_or_none(raw.get("bathsFull")),
+        year_built=_positive_or_none(raw.get("yearBuilt")),
+        lot_sqft=parse_lot(raw.get("lotSize")),
+        property_type=property_type,
+    )
