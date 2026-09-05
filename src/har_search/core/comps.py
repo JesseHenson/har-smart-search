@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 from math import asin, cos, radians, sin, sqrt
+from statistics import median
 
 from har_search.core.models import Comp, Listing, Sale, Valuation
 
@@ -159,3 +160,122 @@ def select_comps(
         if len(matched) >= TARGET_COMPS:
             return matched, tier.basis
     return best, best_basis if best else "none"
+
+
+ADJUSTMENTS = {
+    "beds": (0.03, 0.09),
+    "baths": (0.025, 0.075),
+    "age": (0.0035, 0.10),
+    "lot": (0.0002, 0.05),
+}
+SPREAD_TOLERANCE = 0.10
+
+
+def trimmed_median(values: list[float]) -> float:
+    """Drop the extremes before taking the median.
+
+    This is what keeps one bad source row from moving a whole
+    neighbourhood's estimate.
+    """
+    ordered = sorted(values)
+    if len(ordered) >= 5:
+        drop = max(1, int(len(ordered) * 0.10))
+        ordered = ordered[drop:-drop]
+    return float(median(ordered))
+
+
+def confidence_label(n: int) -> str:
+    if n >= 8:
+        return "high"
+    if n >= 5:
+        return "medium"
+    if n >= MIN_COMPS_FOR_ESTIMATE:
+        return "low"
+    return "insufficient"
+
+
+def _clamp(value: float, cap: float) -> float:
+    return max(-cap, min(cap, value))
+
+
+def _median_of(values: list) -> float | None:
+    present = [v for v in values if v is not None]
+    return float(median(present)) if present else None
+
+
+def _adjustment_factor(subject: Listing, comps: list[Comp]) -> float:
+    factor = 0.0
+
+    comp_beds = _median_of([c.beds for c in comps])
+    if subject.beds is not None and comp_beds is not None:
+        rate, cap = ADJUSTMENTS["beds"]
+        factor += _clamp((subject.beds - comp_beds) * rate, cap)
+
+    comp_baths = _median_of([c.baths_full for c in comps])
+    if subject.baths_full is not None and comp_baths is not None:
+        rate, cap = ADJUSTMENTS["baths"]
+        factor += _clamp((subject.baths_full - comp_baths) * rate, cap)
+
+    comp_year = _median_of([c.year_built for c in comps])
+    if subject.year_built is not None and comp_year is not None:
+        rate, cap = ADJUSTMENTS["age"]
+        years_older = comp_year - subject.year_built
+        factor += _clamp(-years_older * rate, cap)
+
+    comp_lot = _median_of([c.lot_sqft for c in comps])
+    if subject.lot_sqft is not None and comp_lot:
+        rate, cap = ADJUSTMENTS["lot"]
+        pct_diff = (subject.lot_sqft - comp_lot) / comp_lot * 100
+        factor += _clamp(pct_diff * rate, cap)
+
+    return factor
+
+
+def subdivision_list_to_sold(sales: list[Sale]) -> float | None:
+    ratios = [
+        sale.sold_price / sale.list_price
+        for sale in sales
+        if sale.list_price and sale.sold_price
+    ]
+    return float(median(ratios)) if ratios else None
+
+
+def _spread_flag(estimate: int | None, appraisal) -> str:
+    if estimate is None or appraisal is None:
+        return "single_source"
+    difference = abs(appraisal.midpoint - estimate) / estimate
+    return "clustered" if difference <= SPREAD_TOLERANCE else "scattered"
+
+
+def value_listing(
+    subject: Listing,
+    sales: list[Sale],
+    active: list[Listing],
+    today: date,
+) -> Valuation:
+    comps, basis = select_comps(subject, sales, active, today)
+
+    valuation = Valuation(
+        comp_count=len(comps),
+        comp_ids=[c.id for c in comps],
+        comp_basis=basis if comps else "none",
+        confidence=confidence_label(len(comps)),
+        appraisal_district=subject.appraisal,
+        subdivision_list_to_sold=subdivision_list_to_sold(
+            [s for s in sales if s.subdivision and s.subdivision == subject.subdivision]
+        ),
+    )
+
+    if len(comps) < MIN_COMPS_FOR_ESTIMATE or not subject.sqft:
+        valuation.spread_flag = "single_source"
+        return valuation
+
+    base = trimmed_median([c.price_per_sqft for c in comps]) * subject.sqft
+    estimate = int(round(base * (1 + _adjustment_factor(subject, comps))))
+    valuation.comp_estimate = estimate
+
+    if subject.price:
+        valuation.delta_pct = (subject.price - estimate) / estimate
+
+    valuation.spread_flag = _spread_flag(estimate, subject.appraisal)
+    return valuation
