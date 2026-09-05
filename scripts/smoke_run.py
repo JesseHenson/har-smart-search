@@ -32,7 +32,6 @@ def main() -> None:
         garage_spaces=1,
         max_price_per_sqft=120,
         no_hoa=True,
-        must=["area"],
     )
     result = run_search(
         source=ApifyMemo23Source(token=token),

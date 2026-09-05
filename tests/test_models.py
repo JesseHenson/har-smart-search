@@ -32,9 +32,16 @@ def test_money_range_preserves_imprecision():
     assert rng.midpoint == 1_049_999
 
 
-def test_criteria_defaults_area_and_budget_to_hard_constraints():
+def test_criteria_defaults_location_hard_and_budget_soft():
+    """Spec 5.3: location is the only hard default; budget must stay soft.
+
+    A `must` on max_price deletes every listing more than ~16% over budget
+    (ceiling_score crosses the 0.5 MUST_THRESHOLD there), which is exactly the
+    tail spec 5.2 advertises as rankable and the discovery call asked for.
+    """
     criteria = Criteria(area="Spring", beds=3)
-    assert criteria.must == ["area", "max_price"]
+    assert criteria.must == ["area"]
+    assert "max_price" not in criteria.must
     assert criteria.max_price is None
 
 

@@ -185,7 +185,9 @@ s = 1 / (1 + (miles / 3.0)²)             otherwise
 | HOA | 1.0 |
 | School rating | 1.0 |
 
-Weights are per-saved-search and overridable. Every parameter also carries a `must` flag: when set, a score below `0.5` removes the listing entirely rather than penalizing it. Defaults treat location and maximum budget as hard, everything else as soft.
+Weights are per-saved-search and overridable. Every parameter also carries a `must` flag: when set, a score below `0.5` removes the listing entirely rather than penalizing it.
+
+**Only location is hard by default. Budget is soft.** `must` defaults to `["area"]`. Budget is the one constraint this product exists to relax: §5.2's ceiling curve crosses `0.5` at roughly +16% over the ceiling, so making `max_price` a default `must` would delete the whole `+16%`–`+50%` tail that §5.2 advertises as rankable and that the discovery call asked for by name — *"then you may show me some houses above $200,000, if the search result is not there for below."* Over-budget listings therefore surface, rank low, carry their value KPI, and the user sorts them away. Any parameter, `max_price` included, can be made hard by naming it in `must`.
 
 ### 5.4 Explanation output
 
@@ -355,7 +357,7 @@ class Criteria:
     no_hoa: bool | None = None
     max_age_years: int | None = None
     min_school_rating: str | None = None
-    must: list[str] = field(default_factory=lambda: ["area", "max_price"])
+    must: list[str] = field(default_factory=lambda: ["area"])
     weights: dict[str, float] | None = None
 ```
 

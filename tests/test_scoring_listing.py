@@ -105,3 +105,54 @@ def test_no_hoa_positive_fee_scores_zero():
     assert hoa_param.known is True
     assert hoa_param.score == 0.0
     assert "$150/mo" in hoa_param.detail
+
+
+# --- Default `must` behaviour --------------------------------------------
+#
+# The tests above that pass `must=["area"]` explicitly document the OVERRIDE
+# path and are kept for that reason. The tests below deliberately pass no
+# `must` at all, so they exercise Criteria's default. No test did that before,
+# which is how a default of ["area", "max_price"] — deleting every listing
+# more than ~16% over budget — survived the whole build.
+
+
+def test_over_budget_listing_survives_the_default_must_gate():
+    """Spec 5.2: $250,000 against a $200,000 budget is a rankable outcome.
+
+    ceiling_score(250_000, 200_000) is 0.29, below MUST_THRESHOLD. With
+    max_price in the default `must` this listing is deleted outright and the
+    user never sees the tail the discovery call asked for by name.
+    """
+    criteria = Criteria(area="Spring", beds=3, max_price=200_000)
+    assert criteria.must == ["area"]
+    scored = score_listing(make_listing(price=250_000), criteria, SPRING)
+    assert scored is not None
+    price = next(p for p in scored.params if p.name == "max_price")
+    assert price.score == pytest.approx(0.29, abs=0.01)
+
+
+def test_over_budget_listings_still_rank_below_in_budget_ones_by_default():
+    """Soft, not ignored: the over-budget tail surfaces and sorts to the bottom."""
+    criteria = Criteria(area="Spring", beds=3, max_price=200_000)
+    in_budget = score_listing(make_listing(price=195_000), criteria, SPRING)
+    over = score_listing(make_listing(price=250_000), criteria, SPRING)
+    far_over = score_listing(make_listing(price=300_000), criteria, SPRING)
+    assert None not in (in_budget, over, far_over)
+    assert in_budget.score > over.score > far_over.score
+
+
+def test_default_must_still_deletes_a_listing_outside_the_area():
+    """Location stays hard by default — only budget was relaxed."""
+    criteria = Criteria(area="Spring", beds=3, max_price=200_000)
+    elsewhere = make_listing(
+        city="Dallas", subdivision="Somewhere Else", lat=32.78, lon=-96.80
+    )
+    assert score_listing(elsewhere, criteria, SPRING) is None
+
+
+def test_budget_can_still_be_made_hard_by_naming_it_in_must():
+    """The default is soft; the override is still available and still works."""
+    criteria = Criteria(
+        area="Spring", beds=3, max_price=200_000, must=["area", "max_price"]
+    )
+    assert score_listing(make_listing(price=250_000), criteria, SPRING) is None

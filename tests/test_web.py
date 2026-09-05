@@ -1,3 +1,4 @@
+import re
 from datetime import date
 
 from starlette.testclient import TestClient
@@ -112,6 +113,12 @@ def test_index_reports_the_latest_runs_item_count_not_the_historical_max(tmp_pat
     seen for a saved search, not the current one. Seed a second, later run
     with a SMALLER item_count and confirm the index shows that smaller,
     current number rather than the stale larger one.
+
+    The assertions read the rendered table cells rather than the whole page.
+    Substring-matching the page body made this test time-dependent: `run_at`
+    is a `datetime.now()` timestamp rendered into its own cell, so any run
+    during minute or second 40 put "40" on the page and failed the test for a
+    reason it does not exist to catch.
     """
     path, _ = seed(tmp_path)
     db = Database(path)
@@ -120,8 +127,9 @@ def test_index_reports_the_latest_runs_item_count_not_the_historical_max(tmp_pat
     client = TestClient(create_app(lambda: Database(path)))
     response = client.get("/")
     assert response.status_code == 200
-    assert "12" in response.text
-    assert "40" not in response.text
+    cells = [c.strip() for c in re.findall(r"<td>(.*?)</td>", response.text, re.S)]
+    assert "12" in cells
+    assert "40" not in cells
 
 
 def test_run_page_shows_criteria_counts_next_to_coverage(tmp_path):

@@ -111,7 +111,13 @@ class Criteria:
     no_hoa: bool | None = None
     max_age_years: int | None = None
     min_school_rating: str | None = None
-    must: list[str] = field(default_factory=lambda: ["area", "max_price"])
+    # Location is the only hard default. Budget is deliberately SOFT: spec 5.2
+    # advertises graceful decay to +50% over budget as a rankable outcome
+    # ("then you may show me some houses above $200,000, if the search result
+    # is not there for below"), and a `must` on max_price deletes that tail
+    # outright at +16% over. Any parameter can still be made hard by naming it
+    # in `must`.
+    must: list[str] = field(default_factory=lambda: ["area"])
     weights: dict[str, float] | None = None
 
 
