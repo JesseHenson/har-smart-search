@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from har_search.core.models import Criteria
 
-ACTOR_PATH = "memo23~har-scraper"
-RUN_SYNC_URL = f"https://api.apify.com/v2/acts/{ACTOR_PATH}/run-sync-get-dataset-items"
+DEFAULT_ACTOR = "memo23/har-scraper"
+
+
+def _actor_path(actor: str) -> str:
+    """The API path uses `~` where the actor's own name uses `/`."""
+    return actor.replace("/", "~")
+
+
+def _run_sync_url(actor: str) -> str:
+    return f"https://api.apify.com/v2/acts/{_actor_path(actor)}/run-sync-get-dataset-items"
+
 
 # Criteria property types map onto the actor's own vocabulary.
 _TYPE_TO_ACTOR = {
@@ -16,6 +25,21 @@ _TYPE_TO_ACTOR = {
     "multi_family": "multi-family",
     "lots": "lots",
 }
+
+# This is a similarity finder, not a filter (see core/scoring.py). The
+# vendor-side window below only caps fetch volume; client-side scoring
+# stays the authority on ranking. Each factor mirrors the point in the
+# scoring curve past which a listing can no longer rank meaningfully.
+
+# ceiling_score (tau=CEILING_TAU=0.16) has decayed to ~0.29 at 25% over
+# the ceiling — widen maxPrice/maxPricePerSqft that far so the tolerant
+# tail scoring describes can actually be fetched.
+CEILING_WIDEN_FACTOR = 1.25
+
+# target_score's tau_under for beds/baths (0.82) puts one unit below
+# target at ~0.40 — drop the vendor-side minimum by one unit to match,
+# floored at 1 so the payload never asks for zero or negative rooms.
+TARGET_MIN_STEPDOWN = 1
 
 
 def criteria_to_actor_input(criteria: Criteria, limit: int) -> dict:
@@ -28,13 +52,13 @@ def criteria_to_actor_input(criteria: Criteria, limit: int) -> dict:
         "sortBy": "newest",
     }
     if criteria.beds is not None:
-        payload["minBeds"] = criteria.beds
+        payload["minBeds"] = max(1, criteria.beds - TARGET_MIN_STEPDOWN)
     if criteria.baths is not None:
-        payload["minBaths"] = criteria.baths
+        payload["minBaths"] = max(1, criteria.baths - TARGET_MIN_STEPDOWN)
     if criteria.max_price is not None:
-        payload["maxPrice"] = criteria.max_price
+        payload["maxPrice"] = int(criteria.max_price * CEILING_WIDEN_FACTOR)
     if criteria.max_price_per_sqft is not None:
-        payload["maxPricePerSqft"] = int(criteria.max_price_per_sqft)
+        payload["maxPricePerSqft"] = int(criteria.max_price_per_sqft * CEILING_WIDEN_FACTOR)
     if criteria.sqft is not None:
         payload["minSqft"] = int(criteria.sqft * 0.75)
     if criteria.property_types:
@@ -51,8 +75,16 @@ def criteria_to_actor_input(criteria: Criteria, limit: int) -> dict:
 class ApifyMemo23Source:
     name = "apify_memo23"
 
-    def __init__(self, token: str, http=None, timeout: float = 180.0):
+    def __init__(
+        self,
+        token: str,
+        actor: str = DEFAULT_ACTOR,
+        http=None,
+        timeout: float = 180.0,
+    ):
         self._token = token
+        self._actor = actor
+        self._run_sync_url = _run_sync_url(actor)
         self._timeout = timeout
         if http is None:
             import httpx
@@ -62,7 +94,7 @@ class ApifyMemo23Source:
 
     def _run(self, payload: dict) -> list[dict]:
         response = self._http.post(
-            RUN_SYNC_URL,
+            self._run_sync_url,
             json=payload,
             params={"token": self._token},
             timeout=self._timeout,
