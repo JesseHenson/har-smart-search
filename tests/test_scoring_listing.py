@@ -1,6 +1,6 @@
 import pytest
 
-from har_search.core.models import Criteria, DuplexScope, GarageInfo, Listing, PropertyType
+from har_search.core.models import Criteria, DuplexScope, GarageInfo, HOA, Listing, PropertyType
 from har_search.core.scoring import score_listing
 
 SPRING = (30.06, -95.42)
@@ -85,3 +85,23 @@ def test_why_names_the_deviation_and_the_matches():
     criteria = Criteria(area="Spring", beds=3, baths=2, max_price=250_000)
     scored = score_listing(make_listing(beds=4), criteria, SPRING)
     assert "beds" in scored.why.lower()
+
+
+def test_no_hoa_zero_fee_scores_perfectly():
+    """A listing with $0/mo HOA should score 1.0, not 0.0."""
+    criteria = Criteria(area="Spring", no_hoa=True, max_price=250_000)
+    scored = score_listing(make_listing(hoa=HOA(monthly_usd=0.0)), criteria, SPRING)
+    hoa_param = next(p for p in scored.params if p.name == "no_hoa")
+    assert hoa_param.known is True
+    assert hoa_param.score == 1.0
+    assert "no HOA" in hoa_param.detail
+
+
+def test_no_hoa_positive_fee_scores_zero():
+    """A listing with a positive HOA fee should score 0.0 when no_hoa is requested."""
+    criteria = Criteria(area="Spring", no_hoa=True, max_price=250_000)
+    scored = score_listing(make_listing(hoa=HOA(monthly_usd=150.0)), criteria, SPRING)
+    hoa_param = next(p for p in scored.params if p.name == "no_hoa")
+    assert hoa_param.known is True
+    assert hoa_param.score == 0.0
+    assert "$150/mo" in hoa_param.detail

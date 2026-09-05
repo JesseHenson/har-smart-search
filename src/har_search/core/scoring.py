@@ -126,6 +126,31 @@ def _target_param(criteria, name, target, actual, unit) -> ParamScore:
     return _param(name, score, weight, True, f"{actual}{unit} vs {target}{unit} wanted")
 
 
+def _ceiling_param(criteria, name, actual, ceiling, format_fn) -> ParamScore:
+    """Score a ceiling parameter (max_price, max_price_per_sqft, max_age_years).
+
+    Mirrors _target_param's shape and responsibilities.
+
+    Args:
+        criteria: The Criteria object.
+        name: Parameter name (e.g., "max_price").
+        actual: The listing's value (e.g., listing.price).
+        ceiling: The criteria's ceiling value (e.g., criteria.max_price).
+        format_fn: Function to format detail string given (actual, ceiling).
+                   Called only when actual is not None.
+
+    Returns:
+        A ParamScore with known=False if actual is None, else known=True.
+    """
+    weight = _weight(criteria, name)
+    if actual is None:
+        unknown_msg = f"no {name.replace('max_', '')}"
+        return _param(name, 0.0, weight, False, unknown_msg)
+    score = ceiling_score(actual, ceiling)
+    detail = format_fn(actual, ceiling)
+    return _param(name, score, weight, True, detail)
+
+
 def score_listing(
     listing: Listing,
     criteria: Criteria,
@@ -159,36 +184,26 @@ def score_listing(
 
     # Ceiling parameters.
     if criteria.max_price is not None:
-        weight = _weight(criteria, "max_price")
-        if listing.price is None:
-            params.append(_param("max_price", 0.0, weight, False, "no price"))
-        else:
-            params.append(
-                _param(
-                    "max_price",
-                    ceiling_score(listing.price, criteria.max_price),
-                    weight,
-                    True,
-                    f"${listing.price:,} vs ${criteria.max_price:,} budget",
-                )
+        params.append(
+            _ceiling_param(
+                criteria,
+                "max_price",
+                listing.price,
+                criteria.max_price,
+                lambda actual, ceiling: f"${actual:,} vs ${ceiling:,} budget",
             )
+        )
 
     if criteria.max_price_per_sqft is not None:
-        weight = _weight(criteria, "max_price_per_sqft")
-        if listing.price_per_sqft is None:
-            params.append(
-                _param("max_price_per_sqft", 0.0, weight, False, "no price per sqft")
+        params.append(
+            _ceiling_param(
+                criteria,
+                "max_price_per_sqft",
+                listing.price_per_sqft,
+                criteria.max_price_per_sqft,
+                lambda actual, ceiling: f"${actual:.0f}/sqft vs ${ceiling:.0f} wanted",
             )
-        else:
-            params.append(
-                _param(
-                    "max_price_per_sqft",
-                    ceiling_score(listing.price_per_sqft, criteria.max_price_per_sqft),
-                    weight,
-                    True,
-                    f"${listing.price_per_sqft:.0f}/sqft vs ${criteria.max_price_per_sqft:.0f} wanted",
-                )
-            )
+        )
 
     # Target parameters.
     if criteria.beds is not None:
@@ -243,15 +258,9 @@ def score_listing(
         if listing.hoa is None:
             params.append(_param("no_hoa", 0.0, weight, False, "HOA not published"))
         else:
-            params.append(
-                _param(
-                    "no_hoa",
-                    0.0,
-                    weight,
-                    True,
-                    f"HOA ${listing.hoa.monthly_usd:.0f}/mo",
-                )
-            )
+            score = 1.0 if listing.hoa.monthly_usd == 0.0 else 0.0
+            detail = "no HOA" if listing.hoa.monthly_usd == 0.0 else f"HOA ${listing.hoa.monthly_usd:.0f}/mo"
+            params.append(_param("no_hoa", score, weight, True, detail))
 
     # School rating.
     if criteria.min_school_rating:
