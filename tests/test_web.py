@@ -207,7 +207,7 @@ def test_listing_page_renders_no_raw_literal_tokens(tmp_path):
     text = client.get(f"/run/{snapshot_id}/listing/L1")
     body = text.text
     assert "single_source" not in body
-    assert "6 comparable closed sales, medium confidence" in body
+    assert "6 closed sales, medium confidence" in body
     assert "Only one source of value" in body
 
 

@@ -34,9 +34,9 @@
 <h2>Data quality</h2>
 <p class="muted">
   {% if excluded_summary %}
-  {{ snapshot.excluded_count }} rows left out of these results — {{ excluded_summary }}.
+  {{ excluded_count }} left out of these results — {{ excluded_summary }}.
   {% else %}
-  {{ snapshot.excluded_count }} rows left out of these results.
+  {{ excluded_count }} left out of these results.
   {% endif %}
 </p>
 <p class="muted">

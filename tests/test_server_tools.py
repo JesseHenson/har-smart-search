@@ -163,14 +163,14 @@ def test_explain_of_a_sold_basis_makes_no_budget_caveat():
     }
     payload = build_explain_response(row, [])
     assert "budget range" not in payload["basis_note"]
-    assert payload["evidence"] == "6 comparable closed sales, medium confidence"
+    assert payload["evidence"] == "6 closed sales, medium confidence"
 
 
 def test_search_response_keeps_tokens_and_adds_prose():
     payload = build_search_response(make_result(), limit=10, dashboard_url="http://x/run/7")
     row = payload["results"][0]
     assert row["comp_basis"] == "sold"  # still machine-readable
-    assert row["evidence"] == "6 comparable closed sales, medium confidence"
+    assert row["evidence"] == "6 closed sales, medium confidence"
     assert "closed sales" in row["basis_note"]
 
 

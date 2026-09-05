@@ -23,6 +23,7 @@ from har_search.core.labels import (
     describe_exclusions,
     evidence_phrase,
     param_label,
+    row_count,
     spread_phrase,
 )
 
@@ -98,6 +99,7 @@ def create_app(db_factory) -> Starlette:
                 "snapshot": snapshot,
                 "rows": rows,
                 "snapshot_id": snapshot_id,
+                "excluded_count": row_count(snapshot["excluded_count"]),
                 "excluded_summary": excluded,
                 "sold_excluded_summary": sold_excluded,
             },

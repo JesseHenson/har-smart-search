@@ -156,3 +156,44 @@ def test_budget_can_still_be_made_hard_by_naming_it_in_must():
         area="Spring", beds=3, max_price=200_000, must=["area", "max_price"]
     )
     assert score_listing(make_listing(price=250_000), criteria, SPRING) is None
+
+
+# --- No machine identifiers in user-facing prose (spec 9) ----------------
+
+
+def test_unknown_ceiling_parameter_reads_as_english_not_an_identifier():
+    """This rendered "no price_per_sqft" on screen.
+
+    It is reachable in the demo itself: the prospect's own example specifies a
+    $/sqft ceiling, and multi-family listings do not publish one.
+    """
+    criteria = Criteria(area="Spring", max_price=250_000, max_price_per_sqft=120)
+    scored = score_listing(make_listing(price_per_sqft=None), criteria, SPRING)
+    param = next(p for p in scored.params if p.name == "max_price_per_sqft")
+    assert param.known is False
+    assert param.detail == "price per sqft not published"
+    assert "_" not in param.detail
+
+
+def test_no_scoring_detail_or_explanation_contains_a_raw_identifier():
+    """A sweep, so a new parameter cannot quietly reintroduce the habit."""
+    criteria = Criteria(
+        area="Spring",
+        beds=3,
+        baths=2,
+        garage_spaces=2,
+        sqft=1500,
+        max_price=250_000,
+        max_price_per_sqft=120,
+        max_age_years=20,
+        property_types=["single_family"],
+        no_hoa=True,
+        min_school_rating="B",
+    )
+    bare = Listing(listing_id="L2", city="Spring", price=215_000)
+    for listing in (make_listing(), bare):
+        scored = score_listing(listing, criteria, SPRING)
+        assert scored is not None
+        for param in scored.params:
+            assert "_" not in param.detail, f"{param.name}: {param.detail}"
+        assert "_" not in scored.why, scored.why

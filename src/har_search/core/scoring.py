@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from har_search.core.labels import param_label, unknown_detail
+from har_search.core.labels import param_label, property_type_label, unknown_detail
 from har_search.core.models import Criteria, Listing, ParamScore, PropertyType, ScoredListing
 
 # (tau_over, tau_under) per target parameter, in that parameter's own units.
@@ -251,7 +251,7 @@ def score_listing(
                     categorical_score(listing.property_type, wanted),
                     weight,
                     True,
-                    listing.property_type.value,
+                    property_type_label(listing.property_type.value),
                 )
             )
 

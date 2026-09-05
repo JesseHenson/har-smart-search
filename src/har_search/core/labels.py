@@ -46,6 +46,27 @@ def unknown_detail(name: str) -> str:
     return f"{param_label(name)} not published"
 
 
+# --- Property types ------------------------------------------------------
+
+# `PropertyType` values are enum identifiers, and `score_listing` put them
+# straight into the detail string the listing page renders: "single_family".
+PROPERTY_TYPE_LABELS: dict[str, str] = {
+    "single_family": "single-family",
+    "townhouse_condo": "townhouse or condo",
+    "duplex": "duplex",
+    "fourplex": "fourplex",
+    "multi_family": "multi-family",
+    "lots": "lot or acreage",
+    "other": "other",
+}
+
+
+def property_type_label(value: str | None) -> str:
+    if not value:
+        return "unknown type"
+    return PROPERTY_TYPE_LABELS.get(value, value.replace("_", " "))
+
+
 # --- Valuation basis (spec 6.1 tier 4) -----------------------------------
 
 # The asking-basis wording carries a real limitation, not just a label. The
@@ -55,12 +76,6 @@ def unknown_detail(name: str) -> str:
 # budget, which biases estimates downward and makes pricier candidates look
 # systematically overpriced. Refetching an unbounded pool is a cost and design
 # change; saying so plainly is not.
-BASIS_PHRASES: dict[str, str] = {
-    "sold": "closed sales",
-    "asking": "asking prices of listings inside your searched budget range",
-    "none": "no comparable sales",
-}
-
 BASIS_NOTES: dict[str, str] = {
     "sold": "Based on closed sales nearby.",
     "asking": (
@@ -71,11 +86,6 @@ BASIS_NOTES: dict[str, str] = {
     ),
     "none": "No comparable sales were found, so no estimate was produced.",
 }
-
-
-def basis_phrase(comp_basis: str | None) -> str:
-    """A short noun phrase naming what the estimate rests on."""
-    return BASIS_PHRASES.get(comp_basis or "none", "no comparable sales")
 
 
 def basis_note(comp_basis: str | None) -> str:
@@ -119,13 +129,24 @@ def spread_phrase(spread_flag: str | None) -> str:
     return SPREAD_PHRASES.get(spread_flag or "single_source", SPREAD_PHRASES["single_source"])
 
 
+# (singular, plural), so one comp does not read "1 closed sales".
+EVIDENCE_NOUNS: dict[str, tuple[str, str]] = {
+    "sold": ("closed sale", "closed sales"),
+    "asking": ("asking price", "asking prices"),
+}
+
+
 def evidence_phrase(comp_count: int | None, comp_basis: str, confidence: str) -> str:
-    """The evidence line that sits beside every estimate: "6 closed sales, medium confidence"."""
+    """The evidence line beside every estimate: "6 closed sales, medium confidence".
+
+    Spec 9: every KPI renders with its evidence count attached, never as a
+    bare figure.
+    """
     count = comp_count or 0
-    noun = basis_phrase(comp_basis)
     if comp_basis in (None, "none") or count == 0:
         return f"No comparable sales found — {confidence_phrase(confidence)}"
-    return f"{count} comparable {noun}, {confidence_phrase(confidence)}"
+    singular, plural = EVIDENCE_NOUNS.get(comp_basis, ("comparable", "comparables"))
+    return f"{count} {singular if count == 1 else plural}, {confidence_phrase(confidence)}"
 
 
 # --- Data-quality exclusions (spec 4.2) ----------------------------------
@@ -144,6 +165,11 @@ EXCLUSION_PHRASES: dict[str, tuple[str, str]] = {
     ),
     "unknown": ("unrecognized row", "unrecognized rows"),
 }
+
+
+def row_count(count: int) -> str:
+    """"1 row" / "3 rows" — the plain count that heads the data-quality footer."""
+    return f"{count} row" if count == 1 else f"{count} rows"
 
 
 def exclusion_phrase(reason: str, count: int) -> str:
