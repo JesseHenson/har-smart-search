@@ -39,7 +39,10 @@ class Database:
     # not add a column to a table that already exists, and the demo database is
     # captured days before the meeting, so an in-place migration is the only
     # thing standing between a new column and a broken existing database.
-    _ADDED_COLUMNS = (("snapshots", "sold_exclusions_json", "TEXT"),)
+    _ADDED_COLUMNS = (
+        ("snapshots", "sold_exclusions_json", "TEXT"),
+        ("snapshots", "dropped_by_must", "INTEGER NOT NULL DEFAULT 0"),
+    )
 
     def init_schema(self) -> None:
         self._conn.executescript(SCHEMA_PATH.read_text())
@@ -63,11 +66,12 @@ class Database:
         excluded_count: int,
         exclusions: dict,
         sold_exclusions: dict | None = None,
+        dropped_by_must: int = 0,
     ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO snapshots (saved_search, run_at, source, item_count,"
-            " excluded_count, exclusions_json, sold_exclusions_json)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " excluded_count, exclusions_json, sold_exclusions_json, dropped_by_must)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 saved_search,
                 datetime.now().isoformat(timespec="seconds"),
@@ -76,6 +80,7 @@ class Database:
                 excluded_count,
                 json.dumps(exclusions),
                 json.dumps(sold_exclusions or {}),
+                dropped_by_must,
             ),
         )
         self._conn.commit()

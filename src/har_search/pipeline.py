@@ -115,6 +115,7 @@ def run_search(
         excluded_count=sum(exclusions.values()) + dropped_by_must,
         exclusions=dict(exclusions),
         sold_exclusions=dict(sold_exclusions),
+        dropped_by_must=dropped_by_must,
     )
     db.insert_scored(snapshot_id, scored, valuations)
 

@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
   item_count INTEGER NOT NULL,
   excluded_count INTEGER NOT NULL,
   exclusions_json TEXT,
-  sold_exclusions_json TEXT
+  sold_exclusions_json TEXT,
+  dropped_by_must INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS listings (

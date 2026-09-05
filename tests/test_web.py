@@ -198,6 +198,37 @@ def test_run_page_says_so_when_no_sold_rows_were_excluded(tmp_path):
     assert "every sold row in this run was usable" in text.lower()
 
 
+def test_run_page_footer_total_reconciles_with_its_own_itemization(tmp_path):
+    """The footer's total must equal the sum of what it actually names.
+
+    `excluded_count` is normalization exclusions plus `dropped_by_must`
+    (spec 4.2 / pipeline.py), but the itemization used to cover only
+    normalization exclusions. That rendered "3 rows left out of these
+    results -- 1 row priced below the $10,000 sale floor" with two rows
+    excluded and never named -- under a "Data quality" heading, for rows
+    that were not a data problem at all but failed the hard location
+    requirement.
+    """
+    path = tmp_path / "reconcile.db"
+    db = Database(path)
+    db.init_schema()
+    snapshot_id = db.create_snapshot(
+        "spring", "fixture", 1, 3, {"lease": 1}, dropped_by_must=2
+    )
+    client = TestClient(create_app(lambda: Database(path)))
+    text = client.get(f"/run/{snapshot_id}").text
+
+    assert "3 rows left out of these results" in text
+    assert "1 lease listing" in text
+    assert "2 rows outside the location you searched" in text
+
+    # Not just present -- the itemized counts must sum to the stated total.
+    named_counts = [
+        int(n) for n in re.findall(r"(\d+) (?:lease listings?|rows? outside)", text)
+    ]
+    assert sum(named_counts) == 3
+
+
 # --- Raw machine tokens must not reach the screen (spec 9) ---------------
 
 

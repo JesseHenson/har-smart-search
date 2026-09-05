@@ -179,6 +179,22 @@ def exclusion_phrase(reason: str, count: int) -> str:
     return f"{count} {singular if count == 1 else plural}"
 
 
+def must_drop_phrase(count: int) -> str:
+    """The itemization entry for rows dropped by a hard requirement (spec 4.2).
+
+    These rows are counted in `excluded_count` alongside normalization
+    exclusions, but they are a different kind of drop: the row parsed fine —
+    it failed a parameter marked non-negotiable in `must`, which is location
+    by default and the only hard default this product has. Naming it
+    separately, in this voice, keeps the footer's total equal to the sum of
+    what it actually lists instead of hiding a whole category of drop behind
+    a "Data quality" heading that implies bad data rather than a requirement
+    doing its job.
+    """
+    noun = "row" if count == 1 else "rows"
+    return f"{count} {noun} outside the location you searched (a hard requirement)"
+
+
 def describe_exclusions(exclusions: dict | None) -> str:
     """Render an exclusion counter as prose. Empty input renders as empty."""
     if not exclusions:

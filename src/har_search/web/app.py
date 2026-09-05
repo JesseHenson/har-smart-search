@@ -22,6 +22,7 @@ from har_search.core.labels import (
     change_phrase,
     describe_exclusions,
     evidence_phrase,
+    must_drop_phrase,
     param_label,
     row_count,
     spread_phrase,
@@ -64,9 +65,17 @@ def exclusion_summary(snapshot: dict) -> tuple[str, str]:
     in that table. Six leases arriving inside a sold query is the most
     dangerous data defect in this domain, and it used to leave no trace at all
     while the footer reported a confidently smaller number.
+
+    `excluded_count` (the footer's total) is normalization exclusions plus
+    `dropped_by_must`, so the for-sale prose names both — otherwise the total
+    counts rows the itemization never mentions.
     """
+    parts = [describe_exclusions(json.loads(snapshot.get("exclusions_json") or "{}"))]
+    dropped_by_must = snapshot.get("dropped_by_must") or 0
+    if dropped_by_must:
+        parts.append(must_drop_phrase(dropped_by_must))
     return (
-        describe_exclusions(json.loads(snapshot.get("exclusions_json") or "{}")),
+        ", ".join(part for part in parts if part),
         describe_exclusions(json.loads(snapshot.get("sold_exclusions_json") or "{}")),
     )
 
