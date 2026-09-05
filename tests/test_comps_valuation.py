@@ -13,7 +13,7 @@ from har_search.core.models import Listing, MoneyRange, PropertyType, Sale
 TODAY = date(2026, 9, 4)
 
 
-def make_sale(mls, sold_price, sqft=2400, days_ago=30, list_price=None) -> Sale:
+def make_sale(mls, sold_price, sqft=2400, days_ago=30, list_price=None, lot_sqft=None) -> Sale:
     return Sale(
         mls_number=mls,
         sold_price=sold_price,
@@ -26,6 +26,7 @@ def make_sale(mls, sold_price, sqft=2400, days_ago=30, list_price=None) -> Sale:
         beds=4,
         baths_full=2,
         year_built=2014,
+        lot_sqft=lot_sqft,
         property_type=PropertyType.SINGLE_FAMILY,
     )
 
@@ -98,6 +99,48 @@ def test_bedroom_adjustment_is_applied_and_capped():
     baseline = value_listing(subject(beds=4), sales, active=[], today=TODAY)
     assert more_beds.comp_estimate > baseline.comp_estimate
     assert more_beds.comp_estimate <= baseline.comp_estimate * 1.10
+
+
+def test_single_adjustment_saturates_its_individual_cap():
+    """A 16-bedroom gap must be clamped to the beds cap (0.09), not applied raw.
+
+    comp beds median is 4 (all six comps use the make_sale default). Subject
+    beds=20 gives a raw delta of 16 * 0.03 = 0.48, far past the 0.09 cap.
+    Baths and year_built match the comps exactly (delta 0), and the subject's
+    lot_sqft is left unset, so no other adjustment contributes -- this isolates
+    the beds cap specifically, distinct from the aggregate cap in the test
+    below.
+
+    If `_clamp` did not exist (or the beds cap were not enforced), the factor
+    would be 0.48 and comp_estimate would be int(round(360_000 * 1.48)) ==
+    532_800, not 392_400. The two numbers are far enough apart that this test
+    fails hard if the individual cap is removed.
+    """
+    sales = [make_sale(f"M{i}", 360_000) for i in range(6)]
+    valuation = value_listing(subject(beds=20), sales, active=[], today=TODAY)
+    assert valuation.comp_estimate == 392_400
+
+
+def test_aggregate_adjustment_cap_bounds_combined_factor():
+    """Four adjustments, each saturating its own cap, must not simply add up.
+
+    beds (+0.09), baths (+0.075), age (+0.10), and lot (+0.05) each hit their
+    individual caps here, for an unclamped sum of 0.315 -- a ~32% swing on a
+    $360,000 estimate. AGGREGATE_ADJUSTMENT_CAP=0.15 must bring the applied
+    factor down to 0.15, giving comp_estimate = int(round(360_000 * 1.15)) ==
+    414_000.
+
+    If the aggregate cap in `_adjustment_factor` were removed, the factor
+    would be 0.315 and comp_estimate would be int(round(360_000 * 1.315)) ==
+    473_400 -- a $59,400 difference from the capped answer, so this test
+    fails clearly if the aggregate clamp is deleted. It also confirms the
+    existing bedroom test (0.06, well under 0.15) and outlier test (factor
+    0.0) are undisturbed by the new cap.
+    """
+    sales = [make_sale(f"M{i}", 360_000, lot_sqft=8_000) for i in range(6)]
+    subj = subject(beds=20, baths_full=10, year_built=2050, lot_sqft=100_000)
+    valuation = value_listing(subj, sales, active=[], today=TODAY)
+    assert valuation.comp_estimate == 414_000
 
 
 def test_subdivision_list_to_sold_ratio():

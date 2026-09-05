@@ -169,6 +169,7 @@ ADJUSTMENTS = {
     "lot": (0.0002, 0.05),
 }
 SPREAD_TOLERANCE = 0.10
+AGGREGATE_ADJUSTMENT_CAP = 0.15
 
 
 def trimmed_median(values: list[float]) -> float:
@@ -228,7 +229,7 @@ def _adjustment_factor(subject: Listing, comps: list[Comp]) -> float:
         pct_diff = (subject.lot_sqft - comp_lot) / comp_lot * 100
         factor += _clamp(pct_diff * rate, cap)
 
-    return factor
+    return _clamp(factor, AGGREGATE_ADJUSTMENT_CAP)
 
 
 def subdivision_list_to_sold(sales: list[Sale]) -> float | None:
