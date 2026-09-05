@@ -1,0 +1,85 @@
+import json
+from pathlib import Path
+
+from har_search.core.models import Criteria
+from har_search.sources.apify_memo23 import ApifyMemo23Source, criteria_to_actor_input
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+class StubHttp:
+    """Stands in for httpx.Client. Records calls, returns canned rows."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.calls = []
+
+    def post(self, url, json=None, params=None, timeout=None):
+        self.calls.append({"url": url, "json": json, "params": params})
+        return StubResponse(self.rows)
+
+
+class StubResponse:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._rows
+
+
+def test_criteria_map_onto_actor_input():
+    criteria = Criteria(
+        area="Spring",
+        beds=3,
+        baths=2,
+        max_price=250_000,
+        max_price_per_sqft=120,
+        property_types=["duplex"],
+        no_hoa=True,
+    )
+    payload = criteria_to_actor_input(criteria, limit=25)
+    assert payload["locations"] == ["Spring"]
+    assert payload["listingType"] == "sale"
+    assert payload["minBeds"] == 3
+    assert payload["minBaths"] == 2
+    assert payload["maxPrice"] == 250_000
+    assert payload["maxPricePerSqft"] == 120
+    assert payload["propertyTypes"] == ["multi-family"]
+    assert payload["includeDetails"] is True
+    assert payload["includeAvm"] is True
+    assert payload["maxItems"] == 25
+
+
+def test_criteria_omit_unset_filters():
+    payload = criteria_to_actor_input(Criteria(area="Spring"), limit=10)
+    assert "minBeds" not in payload
+    assert "maxPrice" not in payload
+
+
+def test_fetch_for_sale_returns_raw_rows():
+    rows = json.loads((FIXTURES / "for_sale_spring.json").read_text())
+    http = StubHttp(rows)
+    source = ApifyMemo23Source(token="tok", http=http)
+    result = source.fetch_for_sale(Criteria(area="Spring", beds=3), limit=25)
+    assert len(result) == 3
+    assert result[0]["address"] == "5519 Lynngate Dr"
+
+
+def test_fetch_for_sale_sends_the_token_and_actor_path():
+    http = StubHttp([])
+    source = ApifyMemo23Source(token="tok", http=http)
+    source.fetch_for_sale(Criteria(area="Spring"), limit=5)
+    call = http.calls[0]
+    assert "memo23~har-scraper" in call["url"]
+    assert call["params"]["token"] == "tok"
+
+
+def test_fetch_sold_requests_sold_listing_type():
+    http = StubHttp([])
+    source = ApifyMemo23Source(token="tok", http=http)
+    source.fetch_sold(area="Spring", agent_depth=25, limit=200)
+    assert http.calls[0]["json"]["listingType"] == "sold"
+    assert http.calls[0]["json"]["maxSoldAgents"] == 25
