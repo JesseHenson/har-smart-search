@@ -217,10 +217,12 @@ If the widest tier still yields fewer than 3 candidates, the result is `insuffic
 ### 6.2 Estimate
 
 ```
-base = trimmed_median($/sqft over comps) × subject.sqft
+base = trimmed_mean($/sqft over comps) × subject.sqft
 ```
 
-Trimmed median drops the top and bottom 10% (at least one from each end when `n ≥ 5`). This is what neutralizes source errors like the 10-bedroom, 4,507 sqft record found in recon.
+Texas is a non-disclosure state, so a realistic comp set is thin — five to eight sales, not the dozens a median can afford to be picky about. A median of six values consults exactly two of them; a 10% trimmed mean consults four. On evidence this thin, using more of it outweighs the median's extra robustness to outliers.
+
+The trim drops the top and bottom 10% (at least one from each end when `n ≥ 5`) before averaging, and with a mean it is load-bearing rather than a no-op: it is what neutralizes source errors like the 10-bedroom, 4,507 sqft record found in recon, which an untrimmed mean would not resist. The tradeoff is real and accepted: a trimmed mean is less robust than a median to *multiple* outliers on the same side — with `n < 20` the trim removes exactly one value from each end, so a single bad high comp is fully excluded but a second one on the same side survives into the averaged set and skews the result in a way a median would not have moved. Two things keep that acceptable: the sanity guards in §4.2 (the sale-price floor, the implausible-bedroom check) reject the known bad-row shapes before they reach here, and §6.1's sqft/type matching already constrains candidates before the estimator sees them. Neither is a guarantee against two same-side outliers surviving into a pool — that scenario is tested and documented, not assumed away.
 
 Then bounded adjustments against the comp medians:
 

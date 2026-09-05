@@ -5,7 +5,7 @@ import pytest
 from har_search.core.comps import (
     confidence_label,
     subdivision_list_to_sold,
-    trimmed_median,
+    trimmed_mean,
     value_listing,
 )
 from har_search.core.models import Listing, MoneyRange, PropertyType, Sale
@@ -48,14 +48,42 @@ def subject(price=390_000, **kw) -> Listing:
     return Listing(**base)
 
 
-def test_trimmed_median_ignores_extremes():
+def test_trimming_removes_the_top_and_bottom_decile_before_averaging():
+    """Renamed from `test_trimmed_median_ignores_extremes`.
+
+    A review of the old (median) estimator found this test passed identically
+    against a plain `median()` with no trim at all -- the trim was provably a
+    no-op on a median, so the name's claim of "ignores extremes" was not
+    actually exercised by anything the trim did.
+
+    Now that the estimator is a trimmed mean, the trim is load-bearing: the
+    untrimmed mean of these five values is (100+145+150+155+900)/5 == 290.0,
+    but dropping the one lowest and one highest value first leaves
+    [145, 150, 155], whose mean is 150.0. The 290.0 -> 150.0 movement is the
+    trim actually doing something, which is what this test now verifies.
+    """
     values = [100.0, 145.0, 150.0, 155.0, 900.0]
-    assert trimmed_median(values) == pytest.approx(150.0)
+    assert trimmed_mean(values) == pytest.approx(150.0)
 
 
-def test_trimmed_median_handles_short_lists():
-    assert trimmed_median([150.0]) == pytest.approx(150.0)
-    assert trimmed_median([140.0, 160.0]) == pytest.approx(150.0)
+def test_trimmed_mean_handles_short_lists():
+    """n < 5 skips trimming entirely, so the mean runs over every value."""
+    assert trimmed_mean([150.0]) == pytest.approx(150.0)
+    assert trimmed_mean([140.0, 160.0]) == pytest.approx(150.0)
+
+
+def test_trimmed_mean_diverges_from_a_median_on_a_skewed_retained_set():
+    """Direct proof that mean and median now give different answers.
+
+    Sorted input: [50, 100, 101, 102, 500, 900]. n=6 drops 1 from each end,
+    retaining [100, 101, 102, 500]. A median of that retained set is
+    (101 + 102) / 2 == 101.5 -- the old `trimmed_median` implementation's
+    answer. The trimmed mean is (100+101+102+500)/4 == 200.75. The two
+    disagree by nearly 100, so this is not one of the many inputs where a
+    median and a trimmed mean happen to agree.
+    """
+    values = [50.0, 100.0, 101.0, 102.0, 500.0, 900.0]
+    assert trimmed_mean(values) == pytest.approx(200.75)
 
 
 @pytest.mark.parametrize(
@@ -83,6 +111,57 @@ def test_planted_outlier_does_not_move_the_estimate():
     sales.append(make_sale("OUTLIER", 2_000_000))
     valuation = value_listing(subject(), sales, active=[], today=TODAY)
     assert valuation.comp_estimate == pytest.approx(360_000, rel=0.05)
+
+
+def test_value_listing_uses_the_mean_of_a_skewed_comp_set():
+    """End-to-end proof that `value_listing` now consults more than two comps.
+
+    Six comps carry price/sqft of [50, 100, 101, 102, 500, 900] (sqft fixed at
+    2400, so prices are those figures times 2400). Trimming drops 50 and 900,
+    leaving [100, 101, 102, 500].
+
+    Under the OLD median-based estimator this test would have asserted
+    comp_estimate == 243_600: median([100,101,102,500]) == 101.5,
+    101.5 * 2400 == 243_600.
+
+    Under the new trimmed mean, mean([100,101,102,500]) == 200.75, and
+    200.75 * 2400 == 481_800 -- nearly double the old answer, because the
+    mean is pulled toward the one retained high value (500) in a way the
+    median never was. That divergence is the point of this test.
+    """
+    ppsf_values = [50.0, 100.0, 101.0, 102.0, 500.0, 900.0]
+    sales = [make_sale(f"M{i}", sold_price=ppsf * 2400) for i, ppsf in enumerate(ppsf_values)]
+    valuation = value_listing(subject(), sales, active=[], today=TODAY)
+    assert valuation.comp_estimate == 481_800
+
+
+def test_two_same_side_outliers_survive_the_trim_and_skew_the_mean():
+    """Pins the documented limitation: the trimmed mean is less robust than a
+    median to *multiple* outliers on the same side.
+
+    Four comps cluster near $150/sqft ([145, 148, 150, 152]) and two "bad"
+    high comps ([400, 450]/sqft) survive comp selection -- exactly the
+    scenario spec 6.2's tradeoff note describes: the sqft/type filters and
+    the normalize.py sanity guards usually keep bad rows out, but they are
+    not a guarantee, and this test assumes two get through anyway.
+
+    With n=6, the trim drops exactly one value from each end: it removes the
+    single lowest (145) and single highest (450), but the SECOND high
+    outlier (400) survives into the retained set [148, 150, 152, 400].
+
+    Old median-based estimator on that retained set: median == (150+152)/2
+    == 151.0 -- effectively untouched by the surviving outlier, because a
+    median needs a majority of bad values to move, not just one.
+
+    New trimmed mean on the same retained set: mean == (148+150+152+400)/4
+    == 212.5 -- pulled well above the true ~$150/sqft cluster by the single
+    surviving outlier. That is a real, documented cost of preferring the
+    mean on thin comp sets, not an oversight.
+    """
+    ppsf_values = [145.0, 148.0, 150.0, 152.0, 400.0, 450.0]
+    sales = [make_sale(f"M{i}", sold_price=ppsf * 2400) for i, ppsf in enumerate(ppsf_values)]
+    valuation = value_listing(subject(), sales, active=[], today=TODAY)
+    assert valuation.comp_estimate == 510_000
 
 
 def test_too_few_comps_returns_insufficient_and_no_number():

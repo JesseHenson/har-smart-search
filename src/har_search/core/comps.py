@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 from math import asin, cos, radians, sin, sqrt
-from statistics import median
+from statistics import mean, median
 
 from har_search.core.models import Comp, Listing, Sale, Valuation
 
@@ -206,19 +206,33 @@ SPREAD_TOLERANCE = 0.10
 AGGREGATE_ADJUSTMENT_CAP = 0.15
 
 
-def trimmed_median(values: list[float]) -> float:
-    """Return the median, which is inherently resistant to outliers.
+def trimmed_mean(values: list[float]) -> float:
+    """Return the mean of `values` after dropping the top and bottom 10%.
 
-    The symmetric 10% trim is a no-op (removing k elements from each end shifts
-    the median index by k, preserving the result). It is retained as a guard in
-    case the estimator changes to a mean, where trimming would provide genuine
-    robustness.
+    Why a mean over a median: Texas is a non-disclosure state, so a realistic
+    comp set is thin -- five to eight sales is typical. A median of six values
+    consults exactly two of them; this trimmed mean consults four. On thin
+    evidence, using more of it is worth more than the median's extra
+    robustness, and it makes the trim load-bearing rather than decorative --
+    dropping the top and bottom 10% before averaging is what neutralizes
+    source errors like the 10-bedroom, 4,507 sqft record found in recon,
+    which a plain mean would not resist.
+
+    Trade-off: a trimmed mean is less robust than a median to *multiple*
+    outliers on the same side. With this trim rule, n < 20 drops exactly one
+    value from each end, so one bad high (or low) comp is fully excluded, but
+    two bad comps on the same side leave one of them in the retained set,
+    skewing the average in a way that would not move a median. This function
+    does not defend against that case on its own -- the sanity guards in
+    `core/normalize.py` (the sale-price floor, the implausible-bedroom check)
+    and the sqft/type constraints in comp selection above are what keep most
+    such rows out of the pool before they ever reach here.
     """
     ordered = sorted(values)
     if len(ordered) >= 5:
         drop = max(1, int(len(ordered) * 0.10))
         ordered = ordered[drop:-drop]
-    return float(median(ordered))
+    return float(mean(ordered))
 
 
 def confidence_label(n: int) -> str:
@@ -318,7 +332,7 @@ def value_listing(
         valuation.spread_flag = "single_source"
         return valuation
 
-    base = trimmed_median([c.price_per_sqft for c in comps]) * subject.sqft
+    base = trimmed_mean([c.price_per_sqft for c in comps]) * subject.sqft
     estimate = int(round(base * (1 + _adjustment_factor(subject, comps))))
     valuation.comp_estimate = estimate
 
