@@ -159,11 +159,15 @@
 > days on market, school ratings and coordinates all populated. The display-only rule still
 > holds as a discipline, but the reason for it is now "unproven under load", not "missing".
 
-## Comp coverage — measured, not assumed
+## Comp coverage — measured on 103 real sold rows
 - **Sold rows are not geographically targeted** — they come from agents' closed-deal history, so a Spring query returns Tomball, Katy and Pearland sales too
 - **Distance is not the binding constraint, size is** — three sold comps landed within 1.4 miles of a test subject and all three failed the sqft band (x0.51, x0.72, x0.72)
 - **Coverage scales with how many agents are crawled** — `maxSoldAgents` is the real lever, and it costs time and money per run
-- ? **measure before tuning** — widen the sqft band only if a full-size run still leaves most rows without an estimate
+- **Measured funnel**: 77 usable sold rows metro-wide -> 1-5 within 2 miles of a subject -> 0-3 after the sqft band
+- **Only 1 of 5 listings got an estimate** — and age filtering removed nothing, so recency is not the constraint
+- **A quarter of the pull was rentals** — 26 of 103 rows were leases, excluded correctly but paid for
+- **Scaling estimate**: roughly 5% of agent-sourced sold rows land within 2 miles, so 3+ comps per subject needs ~800 rows, about $3.20 per pull, cached a week
+- ? **targeted sold pulls** — test whether the actor's `startUrls` accepts a HAR sold search filtered by zip; geography-first would beat agent-crawling by roughly 5x on cost
 
 > **Why not just widen the band**
 > A comp that is half the subject's size is not a comp, and loosening the band to manufacture
