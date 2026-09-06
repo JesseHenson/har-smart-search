@@ -299,3 +299,58 @@ def test_diff_page_renders_change_types_as_english(tmp_path):
     body = client.get(f"/run/{second}/diff").text
     assert "PRICE_CUT" not in body
     assert "Price cut" in body
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _get(url: str, timeout: float = 5.0) -> int:
+    """Poll url until it answers, returning the status code."""
+    import time
+    import urllib.error
+    import urllib.request
+
+    deadline = time.monotonic() + timeout
+    last: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1) as response:
+                return response.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+        except OSError as exc:
+            last = exc
+            time.sleep(0.05)
+    raise AssertionError(f"{url} never answered: {last}")
+
+
+def test_dashboard_falls_back_when_the_configured_port_is_taken(tmp_path, monkeypatch):
+    """A URL handed to the user must answer.
+
+    The old code started uvicorn in a daemon thread and returned the URL
+    without waiting: if the port was already held, bind failed inside the
+    thread and the caller got a link to nothing.
+    """
+    import socket
+
+    from har_search import config
+    from har_search.web import app as web_app
+
+    monkeypatch.setattr(config, "database_path", lambda: tmp_path / "fallback.db")
+    monkeypatch.setattr(web_app, "_server_thread", None, raising=False)
+
+    taken = _free_port()
+    with socket.socket() as squatter:
+        squatter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        squatter.bind(("127.0.0.1", taken))
+        squatter.listen(1)
+
+        url = web_app.ensure_dashboard_running(taken)
+
+        assert url != f"http://127.0.0.1:{taken}"
+        assert _get(url) == 200

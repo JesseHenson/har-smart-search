@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HAR Smart Search — dashboard prototype</title>
+<style>
+:root{
+  --bg:#f7f7f5; --panel:#fff; --ink:#1b1b18; --muted:#6b6b63; --line:#e3e2dc;
+  --accent:#3b5bdb; --good:#1a7f4b; --good-bg:#e6f4ec; --bad:#b4341f; --bad-bg:#fbeae6;
+  --chip:#f0efe9; --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#16161a; --panel:#1e1e23; --ink:#eceae4; --muted:#98968d; --line:#2e2e35;
+    --accent:#8ea2ff; --good:#5fd39a; --good-bg:#12301f; --bad:#ff8a72; --bad-bg:#331812;
+    --chip:#2a2a31; --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Inter,system-ui,sans-serif;}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 22px 60px}
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+h1{font-size:24px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:12px}
+.proto{margin-left:auto;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);border:1px solid var(--line);padding:3px 8px;border-radius:99px}
+
+/* saved searches */
+.tabs{display:flex;gap:6px;margin:20px 0 0;flex-wrap:wrap}
+.tab{padding:7px 13px;border-radius:8px 8px 0 0;border:1px solid var(--line);border-bottom:none;
+  background:transparent;color:var(--muted);font-size:14px;cursor:pointer}
+.tab[aria-selected=true]{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:var(--shadow)}
+.tab.add{border-style:dashed;color:var(--muted)}
+
+.banner{display:flex;gap:10px;align-items:flex-start;background:var(--bad-bg);color:var(--bad);
+  border:1px solid color-mix(in srgb,var(--bad) 35%,transparent);border-radius:10px;
+  padding:11px 14px;margin:18px 0 0;font-size:13px}
+.banner b{display:block;margin-bottom:2px}
+.banner .when{color:var(--muted);font-size:12px;margin-top:3px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:0 12px 12px 12px;
+  box-shadow:var(--shadow);padding:18px}
+
+/* criteria */
+.criteria{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:12px}
+label{display:block;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+input,select{width:100%;padding:8px 9px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg);color:var(--ink);font:inherit}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.runbar{display:flex;align-items:center;gap:14px;margin-top:16px;flex-wrap:wrap}
+button.run{background:var(--accent);color:#fff;border:0;padding:9px 18px;border-radius:8px;
+  font:inherit;font-weight:600;cursor:pointer}
+.lastrun{color:var(--muted);font-size:12px}
+
+/* results */
+.resulthead{display:flex;align-items:baseline;gap:10px;margin:26px 0 10px}
+h2{font-size:17px;margin:0}
+.count{color:var(--muted);font-size:12px}
+.tablewrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow)}
+table{border-collapse:collapse;width:100%;min-width:960px;font-variant-numeric:tabular-nums}
+th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+  font-weight:600;padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:13px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+th.num,td.num{text-align:right}
+.addr{font-weight:600}
+.addr a{color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
+.addr a:hover{border-bottom-color:var(--accent);color:var(--accent)}
+.new{display:inline-block;margin-left:7px;background:var(--accent);color:#fff;font-size:10px;
+  font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:99px;
+  vertical-align:1px}
+.meta{color:var(--muted);font-size:12px;margin-top:2px}
+.delta{font-weight:700;white-space:nowrap}
+.delta.under{color:var(--good)}
+.delta.over{color:var(--bad)}
+.persqft{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap}
+.badge{display:inline-block;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:600}
+.badge.exact{background:var(--good-bg);color:var(--good)}
+.badge.stretch{background:var(--chip);color:var(--muted)}
+.chips{margin-top:5px;display:flex;gap:4px;flex-wrap:wrap}
+.chip{background:var(--chip);color:var(--muted);font-size:11px;padding:2px 7px;border-radius:5px}
+.score{font-weight:700}
+.scorebar{height:4px;border-radius:2px;background:var(--chip);margin-top:5px;width:64px;margin-left:auto}
+.scorebar i{display:block;height:100%;border-radius:2px;background:var(--accent)}
+.legend{color:var(--muted);font-size:12px;margin-top:12px;line-height:1.7}
+kbd{background:var(--chip);border-radius:4px;padding:1px 5px;font:inherit;font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>HAR Smart Search</h1>
+  <span class="sub">Spring, TX · investment candidates</span>
+  <span class="proto">prototype · fake data</span>
+</header>
+
+<div class="banner">
+  <span aria-hidden="true">&#9888;</span>
+  <span>
+    <b>Last run failed &mdash; showing older results</b>
+    HAR returned no data on Sat Sep 6, 6:02 AM. Nothing below has been refreshed since.
+    <span class="when">Data shown is from Fri Aug 29, 6:01 AM &middot; 8 days old</span>
+  </span>
+</div>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" aria-selected="true">Spring 3/2 under $260k</button>
+  <button class="tab" role="tab" aria-selected="false">Klein duplexes</button>
+  <button class="tab" role="tab" aria-selected="false">Tomball $/sqft plays</button>
+  <button class="tab add" role="tab" aria-selected="false">+ New search</button>
+</div>
+
+<div class="panel">
+  <div class="criteria">
+    <div><label>Area</label><input value="Spring, TX"></div>
+    <div><label>Max price</label><input value="$260,000"></div>
+    <div><label>Target $/sqft</label><input value="$120"></div>
+    <div><label>Beds</label><input value="3"></div>
+    <div><label>Baths</label><input value="2"></div>
+    <div><label>Sqft</label><input value="1,800"></div>
+  </div>
+  <div class="runbar">
+    <button class="run">Run search</button>
+    <span class="lastrun">Last successful run Fri Aug 29, 6:01 AM · 8 results · comps cached 8 days ago</span>
+  </div>
+</div>
+
+<div class="resulthead">
+  <h2>Results</h2>
+  <span class="count">8 listings, ranked by similarity</span>
+</div>
+
+<div class="tablewrap">
+<table>
+<thead>
+<tr>
+  <th>Property</th>
+  <th class="num">Asking</th>
+  <th class="num">Comps</th>
+  <th class="num">vs comps</th>
+  <th>Match</th>
+  <th>Also on record</th>
+  <th class="num">Score</th>
+</tr>
+</thead>
+<tbody>
+
+<tr>
+  <td><div class="addr"><a href="https://www.har.com/" target="_blank" rel="noopener">3419 Cypress Bend Dr</a></div><div class="meta">3 bd · 2 ba · 1,842 sqft · $133/sqft</div></td>
+  <td class="num">$245,000</td>
+  <td class="num">$268,500<div class="persqft">$146/sqft</div></td>
+  <td class="num"><span class="delta under">−$23,500</span><div class="persqft">−$13/sqft</div></td>
+  <td><span class="badge exact">exact</span></td>
+  <td><div class="chips"><span class="chip">11 days</span><span class="chip">2-car</span><span class="chip">built 2004</span><span class="chip">HOA $420/yr</span></div></td>
+  <td class="num"><span class="score">94</span><div class="scorebar"><i style="width:94%"></i></div></td>
+</tr>
+
+<tr>
+  <td><div class="addr"><a href="https://www.har.com/" target="_blank" rel="noopener">17206 Bamwood Ln</a><span class="new">new</span></div><div class="meta">4 bd · 2 ba · 2,010 sqft · $124/sqft</div></td>
+  <td class="num">$249,900</td>
+  <td class="num">$271,000<div class="persqft">$135/sqft</div></td>
+  <td class="num"><span class="delta under">−$21,100</span><div class="persqft">−$11/sqft</div></td>
+  <td><span class="badge stretch">4 bd (+1)</span></td>
+  <td><div class="chips"><span class="chip">3 days</span><span class="chip">2-car</span><span class="chip">built 1998</span><span class="chip">no HOA</span></div></td>
+  <td class="num"><span class="score">89</span><div class="scorebar"><i style="width:89%"></i></div></td>
+</tr>
+
+<tr>
+  <td><div class="addr"><a href="https://www.har.com/" target="_blank" rel="noopener">1904 Rustling Elms Ct</a></div><div class="meta">3 bd · 2 ba · 1,690 sqft · $139/sqft</div></td>
+  <td class="num">$234,500</td>
+  <td class="num">$246,000<div class="persqft">$144/sqft</div></td>
+  <td class="num"><span class="delta under">−$11,500</span><div class="persqft">−$5/sqft</div></td>
+  <td><span class="badge stretch">1,690 sqft (−110)</span></td>
+  <td><div class="chips"><span class="chip">64 days</span><span class="chip">1-car</span><span class="chip">built 1986</span><span class="chip">HOA $300/yr</span></div></td>
+  <td class="num"><span class="score">85</span><div class="scorebar"><i style="width:85%"></i></div></td>
+</tr>
+
+<tr>
+  <td><div class="addr"><a href="https://www.har.com/" target="_blank" rel="noopener">22711 Wickfield Way</a></div><div class="meta">3 bd · 2 ba · 1,905 sqft · $131/sqft</div></td>
+  <td class="num">$249,000</td>
+  <td class="num">$252,400<div class="persqft">$132/sqft</div></td>
+  <td class="num"><span class="delta under">−$3,400</span><div class="persqft">−$1/sqft</div></td>
+  <td><span class="badge exact">exact</span></td>
+  <td><div class="chips"><span class="chip">28 days</span><span class="chip">2-car</span><span class="chip">built 2011</span><span class="chip">HOA $550/yr</span></div></td>
+  <td class="num"><span class="score">82</span><div class="scorebar"><i style="width:82%"></i></div></td>
+</tr>
+
+<tr>
+  <td><div class="addr"><a href="https://www.har.com/" target="_blank" rel="noopener">6110 Chasewood Park Ln</a></div><div class="meta">3 bd · 2.5 ba · 1,780 sqft · $151/sqft</div></td>
+  <td class="num">$268,900</td>
+  <td class="num">$259,000<div class="persqft">$145/sqft</div></td>
+  <td class="num"><span class="delta over">+$9,900</span><div class="persqft">+$6/sqft</div></td>
+  <td><span class="badge stretch">$268.9k (+$8.9k)</span></td>
+  <td><div class="chips"><span class="chip">9 days</span><span class="chip">2-car</span><span class="chip">built 2016</span><span class="chip">HOA $700/yr</span></div></td>
+  <td class="num"><span class="score">76</span><div class="scorebar"><i style="width:76%"></i></div></td>
+</tr>
+
+<tr>
+  <td><div class="addr"><a href="https://www.har.com/" target="_blank" rel="noopener">815 Timber Trace Dr</a><span class="new">new</span></div><div class="meta">3 bd · 2 ba · 1,455 sqft · $148/sqft</div></td>
+  <td class="num">$215,000</td>
+  <td class="num">$228,700<div class="persqft">$157/sqft</div></td>
+  <td class="num"><span class="delta under">−$13,700</span><div class="persqft">−$9/sqft</div></td>
+  <td><span class="badge stretch">1,455 sqft (−345)</span></td>
+  <td><div class="chips"><span class="chip">2 days</span><span class="chip">no garage</span><span class="chip">built 1979</span><span class="chip">no HOA</span></div></td>
+  <td class="num"><span class="score">71</span><div class="scorebar"><i style="width:71%"></i></div></td>
+</tr>
+
+<tr>
+  <td><div class="addr"><a href="https://www.har.com/" target="_blank" rel="noopener">4402 Louetta Meadow Ct</a></div><div class="meta">4 bd · 3 ba · 2,240 sqft · $118/sqft</div></td>
+  <td class="num">$264,500</td>
+  <td class="num">$289,900<div class="persqft">$129/sqft</div></td>
+  <td class="num"><span class="delta under">−$25,400</span><div class="persqft">−$11/sqft</div></td>
+  <td><span class="badge stretch">4 bd · 3 ba · +$4.5k</span></td>
+  <td><div class="chips"><span class="chip">47 days</span><span class="chip">2-car</span><span class="chip">built 2007</span><span class="chip">HOA $480/yr</span></div></td>
+  <td class="num"><span class="score">68</span><div class="scorebar"><i style="width:68%"></i></div></td>
+</tr>
+
+<tr>
+  <td><div class="addr"><a href="https://www.har.com/" target="_blank" rel="noopener">9038 Fallbrook Bend Dr</a></div><div class="meta">3 bd · 2 ba · 1,610 sqft · $158/sqft</div></td>
+  <td class="num">$254,900</td>
+  <td class="num">$241,200<div class="persqft">$150/sqft</div></td>
+  <td class="num"><span class="delta over">+$13,700</span><div class="persqft">+$8/sqft</div></td>
+  <td><span class="badge exact">exact</span></td>
+  <td><div class="chips"><span class="chip">112 days</span><span class="chip">1-car</span><span class="chip">built 1992</span><span class="chip">HOA $360/yr</span></div></td>
+  <td class="num"><span class="score">64</span><div class="scorebar"><i style="width:64%"></i></div></td>
+</tr>
+
+</tbody>
+</table>
+</div>
+
+<p class="legend">
+  <strong>vs comps</strong> — asking price against nearby comparable active listings (1 mi radius, similar beds and sqft). Negative is priced below the neighborhood.<br>
+  <strong>Match</strong> — <kbd>exact</kbd> means every scoring param was met; a stretch chip names what was relaxed and by how much.<br>
+  <strong>Also on record</strong> — shown for context only; these fields never move the ranking.<br>
+  <strong>new</strong> — listed since the previous run of this saved search.
+</p>
+
+</div>
+</body>
+</html>

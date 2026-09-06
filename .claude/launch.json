@@ -1,0 +1,29 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "readouts",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8899",
+        "--directory",
+        "/Users/jessehenson/.claude/readouts"
+      ],
+      "port": 8899
+    },
+    {
+      "name": "prototype",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8901",
+        "--directory",
+        "/Users/jessehenson/Development/HAR Real Estate Work/.claude/worktrees/new-branch-668df2/prototype"
+      ],
+      "port": 8901
+    }
+  ]
+}

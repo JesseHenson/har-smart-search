@@ -7,6 +7,7 @@ figure would imply a confidence the data does not support.
 from __future__ import annotations
 
 import json
+import socket
 import threading
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from har_search.core.labels import (
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 _server_thread: threading.Thread | None = None
+_server_url: str = ""
 _server_lock = threading.Lock()
 
 
@@ -184,12 +186,28 @@ def ensure_dashboard_running(port: int) -> str:
     no live server and both try to bind the port. The lock makes the whole
     check-and-start one critical section; the fast path (server already
     running) still just acquires an uncontended lock and returns.
+
+    We bind the socket here rather than letting uvicorn do it inside the
+    thread. A failed bind in there is invisible to the caller, who has
+    already been handed a URL — the user clicks a dead link and nothing
+    explains why. Binding first means the port in the returned URL is one
+    we are holding, and a taken port degrades to an OS-assigned free one
+    instead of to silence.
     """
-    global _server_thread
-    base = f"http://127.0.0.1:{port}"
+    global _server_thread, _server_url
     with _server_lock:
         if _server_thread is not None and _server_thread.is_alive():
-            return base
+            return _server_url
+
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            sock.bind(("127.0.0.1", 0))
+        sock.listen(128)
+        bound_port = sock.getsockname()[1]
+        base = f"http://127.0.0.1:{bound_port}"
 
         import uvicorn
 
@@ -204,8 +222,10 @@ def ensure_dashboard_running(port: int) -> str:
         app = create_app(factory)
 
         def serve():
-            uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+            server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
+            server.run(sockets=[sock])
 
         _server_thread = threading.Thread(target=serve, daemon=True)
         _server_thread.start()
+        _server_url = base
         return base
