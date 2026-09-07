@@ -282,3 +282,21 @@ def test_scattered_flag_when_sources_disagree():
     subj.appraisal = MoneyRange(low=200_000, high=200_999)
     valuation = value_listing(subj, sales, active=[], today=TODAY)
     assert valuation.spread_flag == "scattered"
+
+
+def test_confidence_is_capped_when_the_evidence_is_not_local():
+    """Distance has to cost something, or widening the radius silently
+    inflates confidence.
+
+    `_basis_of` already works this way: one asking comp downgrades a whole
+    set to "asking". Distance gets the same treatment — a set of eight
+    comps three miles out is a real estimate, but it is not the same
+    evidence as eight sales on the subject's own street, and the label is
+    the only place a reader can see the difference.
+    """
+    from har_search.core.comps import confidence_label
+
+    assert confidence_label(8) == "high"
+    assert confidence_label(8, max_distance_miles=3.0) == "low"
+    assert confidence_label(8, max_distance_miles=1.5) == "high"
+    assert confidence_label(2, max_distance_miles=3.0) == "insufficient"

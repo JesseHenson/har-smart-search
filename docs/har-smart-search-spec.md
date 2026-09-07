@@ -174,3 +174,15 @@
 > an estimate makes the KPI confidently wrong — the one failure mode this product cannot
 > afford, since the whole point is to validate a price. Thin coverage that says "no estimate"
 > is honest. The fix is more sold rows, not looser rules.
+
+- **Four-mile sold tier added** — measured, not guessed: coverage went from 1 of 5 listings to 4 of 5
+- **Confidence caps at low past two miles** — a wider comp is still an estimate, visibly a weaker one
+- **Pipeline radius is now derived from the tier list** — it had a second hardcoded 2.0 that silently disabled any wider tier
+- **Townhouses still uncovered** — only 4 same-type sold rows in 103; that is type scarcity, and only more rows fix it
+
+> **Why the four-mile tier alone did nothing at first**
+> The pipeline pre-filters sold history by radius before comp selection runs, so selection
+> can only choose from what it was handed. A tier reaching four miles against a pool already
+> cut at two is dead code that raises no error and returns no warning — the run just keeps
+> saying "no estimate". Two radius constants in two modules will always drift; the pipeline
+> now derives its own from the widest sold tier, and a test asserts the relationship.

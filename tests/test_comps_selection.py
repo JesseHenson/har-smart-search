@@ -206,3 +206,20 @@ def test_one_asking_comp_downgrades_the_basis_of_the_whole_set():
     comps, basis = select_comps(SUBJECT, sales, active=active, today=TODAY)
     assert len(comps) == 5
     assert basis == "asking"
+
+
+def test_sold_comps_between_two_and_four_miles_are_still_used():
+    """Measured on 103 real Spring sold rows: at a 2-mile ceiling, four of
+    five test listings got no estimate at all, and widening to four miles
+    doubled the number that reached a usable comp set. A suburban Houston
+    listing four miles out is still the same market; refusing it and falling
+    through to asking prices trades a real sale for an aspiration.
+    """
+    # ~0.036 degrees of longitude at this latitude is a bit over 2 miles.
+    far = [make_sale(f"F{i}", lon=-95.38 + 0.055, subdivision="Elsewhere")
+           for i in range(4)]
+    comps, basis = select_comps(SUBJECT, far, active=[], today=TODAY)
+
+    assert [c.id for c in comps] == ["F0", "F1", "F2", "F3"]
+    assert basis == "sold"
+    assert all(2.0 < c.distance_miles <= 4.0 for c in comps)

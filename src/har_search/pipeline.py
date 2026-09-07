@@ -6,7 +6,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from har_search.core.comps import value_listing
+from har_search.core.comps import TIERS, value_listing
 from har_search.core.keys import snapshot_key
 from har_search.core.models import Criteria, Listing, ScoredListing, Valuation
 from har_search.core.normalize import normalize_listing, normalize_sale
@@ -14,7 +14,15 @@ from har_search.core.scoring import score_listing
 from har_search.store.db import Database
 
 COMP_LOOKBACK_DAYS = 365
-COMP_RADIUS_MILES = 2.0
+
+# Derived, never typed by hand. This bounds the sold rows loaded out of the
+# database, and `select_comps` can only choose from what it is handed — so a
+# literal here that is narrower than the widest sold tier silently disables
+# that tier, with no error and no empty-result to notice. That is exactly what
+# happened when `four_miles` was added against a hardcoded 2.0.
+COMP_RADIUS_MILES = max(
+    tier.max_miles for tier in TIERS if tier.basis == "sold" and tier.max_miles
+)
 
 
 @dataclass

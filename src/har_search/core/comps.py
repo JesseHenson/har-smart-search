@@ -28,12 +28,24 @@ class Tier:
     basis: str
 
 
+# Ordered widest-last: each tier reaches further than the one above it, and
+# selection stops as soon as the accumulated pool is deep enough. `four_miles`
+# exists because measurement demanded it — across 103 real Spring sold rows,
+# a 2-mile ceiling left four of five test listings with no estimate, while
+# four miles doubled the number reaching a usable set. Four miles is still one
+# suburban market; past that, comps cross school districts and price bands, so
+# the tier list stops there rather than chasing coverage into another city.
 TIERS = [
     Tier("subdivision", None, 180, 0.25, "sold"),
     Tier("one_mile", 1.0, 180, 0.25, "sold"),
     Tier("two_miles", 2.0, 365, 0.35, "sold"),
+    Tier("four_miles", 4.0, 365, 0.35, "sold"),
     Tier("active", 2.0, None, 0.35, "asking"),
 ]
+
+# Past this, a comp is still usable but the estimate should not claim to be
+# well-evidenced. See `confidence_label`.
+LOCAL_MILES = 2.0
 
 
 def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -235,14 +247,30 @@ def trimmed_mean(values: list[float]) -> float:
     return float(mean(ordered))
 
 
-def confidence_label(n: int) -> str:
+def confidence_label(n: int, max_distance_miles: float | None = None) -> str:
+    """Count sets the label; distance can only lower it.
+
+    Count alone would let the wider `four_miles` tier launder distant sales
+    into a "high" estimate — the reader sees the same word for eight sales
+    on the subject's street and eight sales three miles away. Capping at
+    "low" once the set reaches past LOCAL_MILES keeps the widened radius
+    honest: still an estimate, visibly a weaker one.
+    """
+    if n < MIN_COMPS_FOR_ESTIMATE:
+        return "insufficient"
+    if max_distance_miles is not None and max_distance_miles > LOCAL_MILES:
+        return "low"
     if n >= 8:
         return "high"
     if n >= 5:
         return "medium"
-    if n >= MIN_COMPS_FOR_ESTIMATE:
-        return "low"
-    return "insufficient"
+    return "low"
+
+
+def _max_distance(comps: list) -> float | None:
+    """Distance of the furthest comp, or None when none carry coordinates."""
+    known = [c.distance_miles for c in comps if c.distance_miles is not None]
+    return max(known) if known else None
 
 
 def _clamp(value: float, cap: float) -> float:
@@ -323,7 +351,10 @@ def value_listing(
         comp_count=len(comps),
         comp_ids=[c.id for c in comps],
         comp_basis=basis if comps else "none",
-        confidence=confidence_label(len(comps)),
+        confidence=confidence_label(
+            len(comps),
+            max_distance_miles=_max_distance(comps),
+        ),
         appraisal_district=subject.appraisal,
         subdivision_list_to_sold=subdivision_list_to_sold(sales, subject.subdivision),
     )

@@ -97,3 +97,21 @@ def test_every_result_carries_a_valuation_even_when_insufficient(tmp_path):
     for scored in result.scored:
         valuation = result.valuations[scored.listing.listing_id]
         assert valuation.confidence in {"high", "medium", "low", "insufficient"}
+
+
+def test_sold_history_is_fetched_as_wide_as_the_widest_comp_tier(tmp_path):
+    """The pipeline pre-filters sold history by radius before `select_comps`
+    ever runs, so a tier reaching further than that filter can never fire.
+
+    Adding the four-mile tier to `comps.TIERS` changed nothing in a real run
+    for exactly this reason: the candidate pool had already been cut at two
+    miles one layer up. Two radius constants in two modules will drift again,
+    so the pipeline derives its own from the tier list.
+    """
+    from har_search.core.comps import TIERS
+    from har_search.pipeline import COMP_RADIUS_MILES
+
+    widest_sold_tier = max(
+        tier.max_miles for tier in TIERS if tier.basis == "sold" and tier.max_miles
+    )
+    assert COMP_RADIUS_MILES >= widest_sold_tier
