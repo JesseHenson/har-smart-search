@@ -58,6 +58,37 @@ class Database:
             if column not in existing:
                 self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
+    def record_saved_search(self, name: str, criteria) -> None:
+        """Remember the criteria behind a saved-search key.
+
+        The key is a hash of the criteria, so it is a one-way function: without
+        this row the dashboard can only show "Katy #f8023fe1" and no reader can
+        tell what was asked for. Re-running the same search rewrites the same
+        row rather than adding one, since identical criteria always hash alike.
+        """
+        payload = criteria if isinstance(criteria, dict) else asdict(criteria)
+        self._conn.execute(
+            "INSERT INTO saved_searches (name, criteria_json, created_at)"
+            " VALUES (?, ?, ?)"
+            " ON CONFLICT(name) DO UPDATE SET criteria_json = excluded.criteria_json",
+            (name, json.dumps(payload), datetime.now().isoformat(timespec="seconds")),
+        )
+        self._conn.commit()
+
+    def get_saved_search(self, name: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT criteria_json FROM saved_searches WHERE name = ?", (name,)
+        ).fetchone()
+        return json.loads(row["criteria_json"]) if row else None
+
+    def list_saved_searches(self) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT name, criteria_json FROM saved_searches ORDER BY name"
+        ).fetchall()
+        return [
+            {"name": r["name"], "criteria": json.loads(r["criteria_json"])} for r in rows
+        ]
+
     def create_snapshot(
         self,
         saved_search: str,

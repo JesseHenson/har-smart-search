@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block body %}
 <h1>Results — {{ snapshot.saved_search }}</h1>
+{% if criteria %}<p class="criteria">{{ criteria }}</p>{% endif %}
 <p class="muted">
   Run {{ snapshot.run_at }} · {{ snapshot.item_count }} results ·
   <a href="/run/{{ snapshot_id }}/diff">what changed</a>

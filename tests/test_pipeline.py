@@ -115,3 +115,33 @@ def test_sold_history_is_fetched_as_wide_as_the_widest_comp_tier(tmp_path):
         tier.max_miles for tier in TIERS if tier.basis == "sold" and tier.max_miles
     )
     assert COMP_RADIUS_MILES >= widest_sold_tier
+
+
+def test_a_run_records_the_criteria_that_produced_it(tmp_path):
+    """The saved_searches table has existed since the first schema and
+    nothing ever wrote to it, so a run was recoverable only as a hash.
+
+    Criteria are what the dashboard header has to show — "Katy #f8023fe1"
+    does not tell a reader what was asked for — and the hash is derived from
+    them, so they cannot be reconstructed from it.
+    """
+    db = make_db(tmp_path)
+    criteria = Criteria(area="Spring", beds=3, baths=2, max_price=250_000)
+    result = run_search(
+        source=FixtureSource(), db=db, criteria=criteria, limit=25, today=TODAY
+    )
+
+    stored = db.get_saved_search(result.saved_search)
+
+    assert stored["area"] == "Spring"
+    assert stored["beds"] == 3
+    assert stored["max_price"] == 250_000
+
+
+def test_rerunning_a_search_does_not_duplicate_its_saved_record(tmp_path):
+    db = make_db(tmp_path)
+    criteria = Criteria(area="Spring", beds=3)
+    for _ in range(2):
+        run_search(source=FixtureSource(), db=db, criteria=criteria, today=TODAY)
+
+    assert len(db.list_saved_searches()) == 1

@@ -219,3 +219,65 @@ CHANGE_PHRASES: dict[str, str] = {
 
 def change_phrase(change_type: str) -> str:
     return CHANGE_PHRASES.get(change_type, change_type.replace("_", " ").capitalize())
+
+
+# --- Criteria, as the user stated them -----------------------------------
+
+
+def criteria_summary(criteria) -> str:
+    """What the user asked for, in one line.
+
+    A saved search is keyed by a hash of its criteria, so a page titled
+    "Katy #f8023fe1" tells the reader nothing about what produced the list
+    below it. Unstated criteria are omitted rather than rendered blank: no
+    bedroom target is not a bedroom target of zero, and padding the line
+    with "— bd" would suggest the search was narrower than it was.
+
+    Accepts a `Criteria` or the plain dict it becomes in the database.
+    """
+    get = criteria.get if isinstance(criteria, dict) else lambda k: getattr(criteria, k, None)
+
+    parts: list[str] = [str(get("area") or "").strip()]
+
+    beds, baths = get("beds"), get("baths")
+    if beds is not None:
+        parts.append(f"{beds} bd")
+    if baths is not None:
+        parts.append(f"{baths} ba")
+
+    sqft = get("sqft")
+    if sqft is not None:
+        parts.append(f"{sqft:,} sqft")
+
+    garage = get("garage_spaces")
+    if garage is not None:
+        parts.append(f"{garage}-car garage")
+
+    # "under", never "at": max_price is a soft ceiling that listings are
+    # allowed to exceed while ranking lower. Wording it as a target would
+    # describe a filter this product deliberately does not apply.
+    max_price = get("max_price")
+    if max_price is not None:
+        parts.append(f"under ${int(max_price):,}")
+
+    max_ppsf = get("max_price_per_sqft")
+    if max_ppsf is not None:
+        parts.append(f"under ${int(max_ppsf):,}/sqft")
+
+    for value in get("property_types") or []:
+        parts.append(property_type_label(value))
+
+    if get("no_hoa"):
+        parts.append("no HOA")
+
+    age = get("max_age_years")
+    if age is not None:
+        # Relative, not a calendar year: "built since 2011" would rot every
+        # January and make this string depend on when it was rendered.
+        parts.append(f"under {age} years old")
+
+    rating = get("min_school_rating")
+    if rating:
+        parts.append(f"schools {rating} or better")
+
+    return " · ".join(p for p in parts if p)

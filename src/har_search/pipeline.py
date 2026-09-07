@@ -67,6 +67,10 @@ def run_search(
     # manage their own buckets (the tests do).
     saved_search = saved_search or snapshot_key(criteria)
 
+    # The criteria are the only human-readable description of this run; the
+    # saved-search key is a hash of them and cannot be read backwards.
+    db.record_saved_search(saved_search, criteria)
+
     # 1. Sold history first, so comps are available for this run's listings.
     sold_exclusions: Counter[str] = Counter()
     sales: list = []

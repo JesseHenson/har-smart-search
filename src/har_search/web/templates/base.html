@@ -3,7 +3,11 @@
 <style>
   :root { color-scheme: light dark; }
   body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 24px; }
-  h1, h2 { margin: 0 0 12px; }
+  h1, h2 { margin: 0 0 6px; }
+  /* The criteria line answers "what did I ask for?" and sits directly
+     under the title, above the run metadata, because it describes the
+     search rather than this particular execution of it. */
+  .criteria { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
   table { border-collapse: collapse; width: 100%; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #8883; }
   th { font-weight: 600; font-size: 12px; text-transform: uppercase; opacity: .7; }

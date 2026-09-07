@@ -2,7 +2,7 @@
   "manifest_version": "0.1",
   "name": "har-smart-search",
   "display_name": "HAR Smart Search",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Similarity search and comparable-sales valuation over HAR listings.",
   "author": {
     "name": "Jesse Henson"

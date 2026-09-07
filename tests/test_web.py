@@ -354,3 +354,32 @@ def test_dashboard_falls_back_when_the_configured_port_is_taken(tmp_path, monkey
 
         assert url != f"http://127.0.0.1:{taken}"
         assert _get(url) == 200
+
+
+def test_run_page_header_states_the_criteria_that_produced_it(tmp_path):
+    """A hash is not a description.
+
+    The header read "Results — Katy #f8023fe1", which says nothing about
+    what was searched for. Anyone comparing two saved searches, or coming
+    back to one a week later, needs the criteria on the page.
+    """
+    path, snapshot_id = seed(tmp_path)
+    db = Database(path)
+    db.record_saved_search(
+        "spring", {"area": "Spring", "beds": 3, "baths": 2, "max_price": 250_000}
+    )
+
+    client = TestClient(create_app(lambda: Database(path)))
+    body = client.get(f"/run/{snapshot_id}").text
+
+    assert "Spring · 3 bd · 2 ba · under $250,000" in body
+
+
+def test_run_page_renders_without_stored_criteria(tmp_path):
+    """Snapshots written before criteria were recorded must still open."""
+    path, snapshot_id = seed(tmp_path)
+
+    client = TestClient(create_app(lambda: Database(path)))
+    response = client.get(f"/run/{snapshot_id}")
+
+    assert response.status_code == 200

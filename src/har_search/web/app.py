@@ -19,6 +19,7 @@ from starlette.templating import Jinja2Templates
 
 from har_search.core.diff import diff_snapshots
 from har_search.core.labels import (
+    criteria_summary,
     basis_note,
     change_phrase,
     describe_exclusions,
@@ -103,11 +104,15 @@ def create_app(db_factory) -> Starlette:
             row["criteria_known"] = known
             row["criteria_total"] = total
         excluded, sold_excluded = exclusion_summary(snapshot)
+        # Snapshots written before criteria were recorded have no row here,
+        # and must still render — an old run is still worth reading.
+        stored = db.get_saved_search(snapshot["saved_search"])
         return TEMPLATES.TemplateResponse(
             request,
             "run.html",
             {
                 "snapshot": snapshot,
+                "criteria": criteria_summary(stored) if stored else None,
                 "rows": rows,
                 "snapshot_id": snapshot_id,
                 "excluded_count": row_count(snapshot["excluded_count"]),
