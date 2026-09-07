@@ -4,11 +4,21 @@
 
     cd "/Users/jessehenson/Development/HAR Real Estate Work"
     uv sync
-    uv pip install --target lib -r <(uv export --no-hashes --no-dev)
+    for v in 3.12 3.13 3.14; do
+      uv pip install --target "lib/py${v/./}" --python "$v" \
+        -r <(uv export --no-hashes --no-dev)
+    done
+    rm -f lib/*/*.pth && rm -rf lib/*/bin
     npx @anthropic-ai/mcpb pack
 
-Dependencies are vendored into `lib/` so the bundle installs without a
-Python environment on the host.
+Dependencies are vendored once per supported CPython ABI, because the
+compiled wheels (`pydantic_core`, `_cffi_backend`) only load on the
+version they were built for — and the host interpreter is not ours to
+choose. Claude Desktop resolves it from PATH. `server/libdir.py` picks
+the matching directory at startup, before any third-party import.
+
+Adding a Python version means vendoring for it, listing it in
+`libdir.SUPPORTED`, and widening `compatibility.runtimes.python`.
 
 `pack` names the output after the directory it runs in, not after the
 manifest — rename the result to `har-smart-search-<version>.mcpb` before

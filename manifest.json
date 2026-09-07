@@ -11,12 +11,12 @@
     "type": "python",
     "entry_point": "src/har_search/server/__main__.py",
     "mcp_config": {
-      "command": "python",
+      "command": "python3",
       "args": [
         "${__dirname}/src/har_search/server/__main__.py"
       ],
       "env": {
-        "PYTHONPATH": "${__dirname}/src:${__dirname}/lib",
+        "PYTHONPATH": "${__dirname}/src",
         "HAR_APIFY_TOKEN": "${user_config.apify_token}",
         "HAR_DASHBOARD_PORT": "${user_config.dashboard_port}"
       }
@@ -61,7 +61,7 @@
       "darwin"
     ],
     "runtimes": {
-      "python": ">=3.12.0 <3.13"
+      "python": ">=3.12.0 <3.15"
     }
   }
 }

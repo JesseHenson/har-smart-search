@@ -21,7 +21,9 @@ uv.lock
 # import har_search from the working tree, so a broken bundle can still
 # demo cleanly. lib/bin holds console scripts nothing here invokes.
 lib/*.pth
+lib/*/*.pth
 lib/bin/
+lib/*/bin/
 
 # Design scratch, not product.
 prototype/

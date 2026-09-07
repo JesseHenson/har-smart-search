@@ -6,9 +6,26 @@ every number in a response was produced by har_search.core.
 
 from __future__ import annotations
 
-from datetime import date
+import os
+import sys
 
-from mcp.server.mcpserver import MCPServer
+# Vendored dependencies go on the path before any third-party import below.
+# Claude Desktop runs this file directly, so sys.path[0] is this directory
+# rather than the bundle's src/; both are derived from __file__ so the server
+# starts the same way whether PYTHONPATH was set or not.
+_SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+from har_search.server.libdir import vendored_lib_dirs  # noqa: E402
+
+for _candidate in reversed(vendored_lib_dirs(os.path.dirname(_SRC))):
+    if os.path.isdir(_candidate) and _candidate not in sys.path:
+        sys.path.insert(0, _candidate)
+
+from datetime import date  # noqa: E402
+
+from mcp.server.mcpserver import MCPServer  # noqa: E402
 
 from har_search import config
 from har_search.core.diff import diff_snapshots
