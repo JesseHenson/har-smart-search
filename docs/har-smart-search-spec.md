@@ -186,3 +186,14 @@
 > cut at two is dead code that raises no error and returns no warning — the run just keeps
 > saying "no estimate". Two radius constants in two modules will always drift; the pipeline
 > now derives its own from the widest sold tier, and a test asserts the relationship.
+
+- **Zip-targeted sold pulls do not work** — `listingType: sold` with a zip location returns zero rows; the actor finds sold history through the agent directory, and agents are indexed by city
+- **`startUrls` documents for-sale and for-rent search pages only** — sold search is not among them, so geographic targeting of sold data is not available from this actor
+- **Remaining levers for type scarcity**: crawl more agents (linear cost), or move to an MLS feed where sold data is queried by geography
+
+> **Why this matters more than it looks**
+> Sold comps are the difference between valuing a house against what neighbours asked and
+> what they actually got. This actor can only reach them through agents' closed-deal history,
+> which is scattered by construction — so comp density is bought by the row, not aimed. An
+> MLS feed queries sold by geography directly, which is the strongest argument yet for
+> Mohammad's answer mattering to the architecture and not just the budget.
