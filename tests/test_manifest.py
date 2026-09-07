@@ -56,3 +56,21 @@ def test_declared_tools_match_server_tools():
         f"Tool mismatch: manifest declares {declared_names} "
         f"but server registers {registered_names}"
     )
+
+
+def test_bundle_excludes_the_editable_install_pointer():
+    """`uv pip install --target lib` leaves an editable .pth in lib/ holding
+    an absolute path to this checkout.
+
+    Shipping it is worse than untidy. On the developer's own machine the path
+    resolves, so an installed bundle silently imports `har_search` from the
+    working tree instead of from its own `src/` — a demo can pass while the
+    bundle itself is broken, and nothing says so. On any other machine the
+    path is simply dead.
+    """
+    ignore = (REPO_ROOT / ".mcpbignore").read_text().splitlines()
+    patterns = {line.strip() for line in ignore if line.strip() and not line.startswith("#")}
+
+    assert "lib/*.pth" in patterns
+    assert "lib/bin/" in patterns
+    assert "prototype/" in patterns

@@ -10,6 +10,20 @@
 Dependencies are vendored into `lib/` so the bundle installs without a
 Python environment on the host.
 
+`pack` names the output after the directory it runs in, not after the
+manifest — rename the result to `har-smart-search-<version>.mcpb` before
+handing it to anyone.
+
+Verify the build before shipping it. Unzip it somewhere else and import
+the server with only the bundle on the path:
+
+    PYTHONPATH=<unpacked>/src:<unpacked>/lib python3.12 -c \
+      "import har_search; print(har_search.__file__)"
+
+The printed path must be inside the unpacked bundle. If it points back at
+this checkout, an editable `.pth` got vendored and the bundle is testing
+your working tree rather than itself.
+
 ## Install
 
 Open the generated `.mcpb` in Claude Desktop and supply an Apify API token
