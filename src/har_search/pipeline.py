@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
 from har_search.core.comps import TIERS, value_listing
+from har_search.core.coverage import escalation_plan
 from har_search.core.keys import snapshot_key
 from har_search.core.models import Criteria, Listing, ScoredListing, Valuation
 from har_search.core.normalize import normalize_listing, normalize_sale
@@ -39,6 +40,11 @@ class SearchResult:
     # a confidently smaller for-sale count.
     sold_exclusions: dict[str, int] = field(default_factory=dict)
     dropped_by_must: int = 0
+    # How far the ladder walked, and which rung each match came from. A
+    # result found three rungs out is not the same answer as one found in
+    # the area asked for, and the caller cannot tell without these.
+    areas_searched: list[str] = field(default_factory=list)
+    area_of: dict[str, str] = field(default_factory=dict)
 
 
 # How long a fetched sold history stays good. Closed sales arrive in a
@@ -67,6 +73,15 @@ ACTIVE_COMP_RADIUS_MILES = 2.0
 # sold lookback: an asking price nobody is asking any more is not evidence.
 ACTIVE_COMP_MAX_AGE_DAYS = 3
 
+# How many matches count as an answer. Below this the search widens to the
+# next rung; at or above it, it stops. Widening past an area that already
+# answered buys latency and vendor spend for nothing.
+TARGET_RESULTS = 5
+
+# How many neighbouring zips the ladder may reach. Each one is a corpus
+# fetch the first time it is searched.
+MAX_NEIGHBOUR_ZIPS = 3
+
 
 def _area_centroid(listings: list[Listing]) -> tuple[float, float] | None:
     points = [(l.lat, l.lon) for l in listings if l.lat is not None and l.lon is not None]
@@ -92,6 +107,23 @@ def _sold_history_is_stale(db, area: str, today: date) -> bool:
     return (today - date.fromisoformat(last)).days >= SOLD_REFRESH_DAYS
 
 
+def _refresh_corpus(source, db, area: str, today: date, exclusions: Counter) -> None:
+    """Pull one area into the corpus if its cache has gone stale."""
+    if not _corpus_is_stale(db, area, today):
+        return
+    fetched: list[Listing] = []
+    for raw in source.fetch_corpus(area, CORPUS_LIMIT):
+        result = normalize_listing(raw)
+        if result.listing is None:
+            exclusions[result.exclusion or "unknown"] += 1
+            continue
+        fetched.append(result.listing)
+    if fetched:
+        db.upsert_actives(fetched, seen_on=today.isoformat())
+        db.tag_corpus_area(area, [l.listing_id for l in fetched])
+    db.record_corpus_fetch(area, today.isoformat())
+
+
 def run_search(
     source,
     db: Database,
@@ -100,6 +132,9 @@ def run_search(
     limit: int = 25,
     today: date | None = None,
     center: tuple[float, float] | None = None,
+    city: str | None = None,
+    max_neighbours: int = MAX_NEIGHBOUR_ZIPS,
+    target_results: int = TARGET_RESULTS,
 ) -> SearchResult:
     today = today or date.today()
     # Snapshots are keyed on the criteria, not the area. Keying on the area
@@ -130,41 +165,58 @@ def run_search(
         # search, paying full latency for a result already known.
         db.record_sold_fetch(criteria.area, today.isoformat())
 
-    # 2. For-sale rows, normalized with every exclusion counted.
-    # The corpus refresh is criteria-free and area-wide, so it is worth caching
-    # hard: every search against a fresh one costs nothing and finishes
-    # instantly. Criteria are applied below, against everything known about the
-    # area rather than against whatever a narrowed fetch happened to return.
+    # 2. Walk outward until an area answers.
+    # The ladder is the comps tiers applied to places: the area asked for,
+    # then its measured neighbours, then the city. A rung is only ever reached
+    # because the one above it came up short, and each new rung costs a vendor
+    # fetch the first time it is used — so the walk stops the moment it has
+    # enough, and `areas_searched` records how far it went either way.
     exclusions: Counter[str] = Counter()
-    if _corpus_is_stale(db, criteria.area, today):
-        fetched: list[Listing] = []
-        for raw in source.fetch_corpus(criteria.area, CORPUS_LIMIT):
-            result = normalize_listing(raw)
-            if result.listing is None:
-                exclusions[result.exclusion or "unknown"] += 1
-                continue
-            fetched.append(result.listing)
-        if fetched:
-            db.upsert_actives(fetched, seen_on=today.isoformat())
-            db.tag_corpus_area(criteria.area, [l.listing_id for l in fetched])
-        db.record_corpus_fetch(criteria.area, today.isoformat())
-    listings: list[Listing] = db.actives_in_area(criteria.area)
-
-    # 3. Score. A listing failing a `must` parameter is removed, and counted.
-    # A supplied center wins over the derived one. `_area_centroid` averages
-    # the listings the fetch returned, which is circular — it describes where
-    # the fetch landed, not where the user asked about, so it cannot correct
-    # a fetch that resolved to the wrong place. It stays as the fallback for
-    # searches that name an area and no address.
-    centroid = center or _area_centroid(listings)
+    plan = escalation_plan(
+        area=criteria.area,
+        center=center,
+        city=city,
+        max_neighbours=max_neighbours,
+    )
+    centroid = center or None
     scored: list[ScoredListing] = []
+    area_of: dict[str, str] = {}
+    areas_searched: list[str] = []
     dropped_by_must = 0
-    for listing in listings:
-        result = score_listing(listing, criteria, centroid)
-        if result is None:
-            dropped_by_must += 1
-            continue
-        scored.append(result)
+
+    for index, area in enumerate(plan):
+        areas_searched.append(area)
+        _refresh_corpus(source, db, area, today, exclusions)
+        listings = [
+            listing
+            for listing in db.actives_in_area(area)
+            if listing.listing_id not in area_of
+        ]
+        if index == 0:
+            # The area asked for is the only rung the caller's center and
+            # radius describe.
+            rung_criteria = criteria
+            rung_centroid = centroid or _area_centroid(listings)
+        else:
+            # A widened rung is a different question — "nothing there, here is
+            # what is near it" — so it is measured from its own centre. Judging
+            # a neighbouring zip by the distance from an address in the
+            # original one would sink every listing on it by construction, and
+            # the ladder could never return anything. What keeps the answer
+            # honest is that these arrive labelled with the area they came
+            # from, not that they were scored against a place they are not in.
+            rung_criteria = replace(criteria, center_address=None, radius_miles=None)
+            rung_centroid = _area_centroid(listings)
+        for listing in listings:
+            result = score_listing(listing, rung_criteria, rung_centroid)
+            if result is None:
+                dropped_by_must += 1
+                continue
+            scored.append(result)
+            area_of[listing.listing_id] = area
+        if len(scored) >= target_results:
+            break
+
     scored.sort(key=lambda s: s.score, reverse=True)
     # `limit` is now purely a presentation cap. It once bounded the vendor
     # fetch as well; keeping the two joined would shrink the comp pool every
@@ -218,4 +270,6 @@ def run_search(
         exclusions=dict(exclusions),
         sold_exclusions=dict(sold_exclusions),
         dropped_by_must=dropped_by_must,
+        areas_searched=areas_searched,
+        area_of=area_of,
     )

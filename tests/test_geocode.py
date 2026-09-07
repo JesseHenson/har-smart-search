@@ -64,3 +64,33 @@ def test_the_address_is_sent_as_a_one_line_query():
     CensusGeocoder(http=http).locate("5255 Beaverbrook Dr, Houston, TX 77084")
     assert http.calls[0]["params"]["address"] == "5255 Beaverbrook Dr, Houston, TX 77084"
     assert http.calls[0]["params"]["format"] == "json"
+
+
+def test_the_place_carries_the_city_the_ladder_widens_to():
+    """The last rung is the city, and the caller only gave an address. Census
+    already names it in the matched address, so asking a second service for
+    something we were handed would be waste."""
+    http = StubHttp(match_payload(x=-95.6597, y=29.8329))
+    place = CensusGeocoder(http=http).locate_place("5255 Beaverbrook Dr")
+    assert (place.lat, place.lon) == (29.8329, -95.6597)
+    assert place.city == "Houston"
+
+
+def test_a_matched_address_without_a_city_still_places_the_point():
+    """A missing city costs the ladder its last rung, nothing more. Refusing
+    the whole geocode over it would lose the radius as well."""
+    payload = {
+        "result": {
+            "addressMatches": [
+                {"matchedAddress": "5255 BEAVERBROOK DR", "coordinates": {"x": -95.6, "y": 29.8}}
+            ]
+        }
+    }
+    place = CensusGeocoder(http=StubHttp(payload)).locate_place("5255 Beaverbrook Dr")
+    assert place.city is None
+    assert place.lat == 29.8
+
+
+def test_no_match_returns_no_place():
+    http = StubHttp({"result": {"addressMatches": []}})
+    assert CensusGeocoder(http=http).locate_place("nowhere") is None

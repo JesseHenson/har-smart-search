@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from har_search.core.models import Criteria
+from har_search.core.coverage import _centroids
 from har_search.core.models import Listing, PropertyType
 from har_search.pipeline import CORPUS_LIMIT, SOLD_REFRESH_DAYS, run_search
 from har_search.store.db import Database
@@ -398,3 +399,98 @@ def test_limit_trims_the_ranked_list_not_the_fetch(tmp_path):
     )
     assert len(result.scored) == 1
     assert source.corpus_calls == [("Spring", CORPUS_LIMIT)]
+
+
+def _zip_centroid(area):
+    for code, lat, lon in _centroids():
+        if code == area:
+            return lat, lon
+    return 30.036, -95.342
+
+
+class PerAreaSource(CountingSource):
+    """Serves rows per area, so a rung either answers or does not.
+
+    Rows are stamped with the area they are served for. A listing has to
+    actually be in the area it is returned for, or the location score sinks it
+    before the ladder is ever exercised.
+    """
+
+    def __init__(self, areas_with_rows):
+        super().__init__()
+        self.areas_with_rows = set(areas_with_rows)
+
+    def fetch_corpus(self, area, limit):
+        self.corpus_calls.append((area, limit))
+        if area not in self.areas_with_rows:
+            return []
+        lat, lon = _zip_centroid(area)
+        rows = []
+        for offset, row in enumerate(
+            json.loads((FIXTURES / "for_sale_spring.json").read_text())
+        ):
+            row = dict(row)
+            row["zip"] = area
+            row["listingId"] = f"{area}-{row['listingId']}"
+            row["latitude"] = lat + offset * 0.002
+            row["longitude"] = lon
+            rows.append(row)
+        return rows
+
+
+def test_a_rung_that_answers_stops_the_ladder(tmp_path):
+    """Widening is what happens when the area asked for came up short. An
+    area that answered must never trigger a fetch of its neighbours — that is
+    latency and vendor spend bought for nothing."""
+    source = PerAreaSource(["77084"])
+    result = run_search(
+        source=source,
+        db=make_db(tmp_path),
+        criteria=Criteria(area="77084", max_price=250_000),
+        limit=25,
+        today=TODAY,
+        city="Houston",
+        target_results=1,
+    )
+    assert [call[0] for call in source.corpus_calls] == ["77084"]
+    assert result.areas_searched == ["77084"]
+    assert result.scored
+
+
+def test_a_thin_area_widens_to_its_neighbours(tmp_path):
+    """77041 is a measured neighbour of the Beaverbrook centroid, not a
+    guess from the digits."""
+    source = PerAreaSource(["77041"])
+    result = run_search(
+        source=source,
+        db=make_db(tmp_path),
+        criteria=Criteria(area="77084", max_price=250_000),
+        limit=25,
+        today=TODAY,
+        city="Houston",
+        center=(29.853592, -95.639297),
+        max_neighbours=2,
+        target_results=1,
+    )
+    assert result.areas_searched[:2] == ["77084", "77041"]
+    assert result.scored
+    assert result.area_of[result.scored[0].listing.listing_id] == "77041"
+
+
+def test_an_exhausted_ladder_reports_what_it_tried(tmp_path):
+    """No matches is a real answer. It is only a useful one if the caller can
+    see how far the search went before saying so."""
+    source = PerAreaSource([])
+    result = run_search(
+        source=source,
+        db=make_db(tmp_path),
+        criteria=Criteria(area="77084", max_price=250_000),
+        limit=25,
+        today=TODAY,
+        city="Houston",
+        center=(29.853592, -95.639297),
+        max_neighbours=2,
+        target_results=5,
+    )
+    assert result.scored == []
+    assert result.areas_searched == ["77084", "77041", "77095", "Houston"]

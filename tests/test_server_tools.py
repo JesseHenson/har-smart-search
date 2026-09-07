@@ -1,5 +1,7 @@
 import pytest
 
+from har_search.sources.geocode import Place
+
 from har_search.core.models import (
     Criteria,
     Listing,
@@ -193,15 +195,18 @@ def test_search_response_returns_the_saved_search_key_for_whats_new():
 
 
 class StubGeocoder:
-    """Returns a fixed point, or nothing for an address it cannot place."""
+    """Returns a fixed place, or nothing for an address it cannot place."""
 
-    def __init__(self, point=None):
+    def __init__(self, point=None, city="Houston"):
         self.point = point
+        self.city = city
         self.asked = []
 
-    def locate(self, address):
+    def locate_place(self, address):
         self.asked.append(address)
-        return self.point
+        if self.point is None:
+            return None
+        return Place(self.point[0], self.point[1], self.city)
 
 
 def test_no_address_means_no_center_and_no_geocoder_call():
@@ -234,3 +239,60 @@ def test_a_radius_without_an_address_is_an_error():
     criteria = Criteria(area="Houston", radius_miles=2.0)
     with pytest.raises(ValueError, match="radius_miles"):
         resolve_center(criteria, StubGeocoder())
+
+
+def result_with(scored, areas_searched, area_of=None):
+    base = make_result()
+    return SearchResult(
+        snapshot_id=base.snapshot_id,
+        saved_search=base.saved_search,
+        scored=scored,
+        valuations=base.valuations,
+        exclusions={},
+        sold_exclusions={},
+        dropped_by_must=0,
+        areas_searched=areas_searched,
+        area_of=area_of or {},
+    )
+
+
+def test_a_search_that_never_widened_says_nothing_about_coverage():
+    """Brief means brief. The common case is one area answering, and a line
+    reporting that is noise in every response that does not need it."""
+    base = make_result()
+    payload = build_search_response(
+        result_with(base.scored, ["77084"], {"L1": "77084"}), 25, dashboard_url="x"
+    )
+    assert "coverage" not in payload
+
+
+def test_widening_is_reported_in_one_line():
+    base = make_result()
+    payload = build_search_response(
+        result_with(base.scored, ["77084", "77041", "77095"], {"L1": "77041"}),
+        25,
+        dashboard_url="x",
+    )
+    assert payload["coverage"] == (
+        "77084 came up short, so the search widened to 77041, 77095."
+    )
+
+
+def test_a_match_from_a_widened_area_is_labelled_as_one():
+    """A house found two rungs out is not the same answer as one in the area
+    asked for, and a reader scanning a list cannot tell them apart otherwise."""
+    base = make_result()
+    payload = build_search_response(
+        result_with(base.scored, ["77084", "77041"], {"L1": "77041"}), 25, dashboard_url="x"
+    )
+    assert payload["results"][0]["found_in"] == "77041"
+
+
+def test_no_matches_says_how_far_it_looked():
+    payload = build_search_response(
+        result_with([], ["77084", "77041", "77095", "Houston"]), 25, dashboard_url="x"
+    )
+    assert payload["results"] == []
+    assert payload["coverage"] == (
+        "No matches. Searched 77084, then 77041, 77095, then Houston."
+    )

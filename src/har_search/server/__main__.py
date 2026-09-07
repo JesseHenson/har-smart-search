@@ -62,6 +62,28 @@ def _change_row(change: ListingChange) -> dict:
     }
 
 
+def coverage_note(areas_searched: list[str], found_any: bool) -> str | None:
+    """One line about how far the search had to go, or nothing.
+
+    Silent when the area asked for answered, which is the common case — a line
+    saying so in every response is noise. When the ladder walked, the reader
+    needs the shape of what happened and not the walk itself; the rung each
+    match came from is on the match, and the full account is in `explain`.
+    """
+    if not areas_searched:
+        return None
+    first, *widened = areas_searched
+    if not found_any:
+        tail = f", then {', '.join(widened)}" if widened else ""
+        # The last rung is the city, and reads better set apart from the zips.
+        if len(widened) > 1:
+            tail = f", then {', '.join(widened[:-1])}, then {widened[-1]}"
+        return f"No matches. Searched {first}{tail}."
+    if not widened:
+        return None
+    return f"{first} came up short, so the search widened to {', '.join(widened)}."
+
+
 def build_search_response(
     result: SearchResult, limit: int, dashboard_url: str
 ) -> dict:
@@ -83,6 +105,15 @@ def build_search_response(
                 "score": scored.score,
                 "coverage": scored.coverage,
                 "why": scored.why,
+                # Present only when it is not the area asked for: a match from
+                # a widened rung must not sit in the list looking equivalent.
+                **(
+                    {"found_in": result.area_of[listing.listing_id]}
+                    if result.area_of.get(listing.listing_id)
+                    and result.areas_searched
+                    and result.area_of[listing.listing_id] != result.areas_searched[0]
+                    else {}
+                ),
                 "estimated_value": valuation.comp_estimate if valuation else None,
                 "comp_count": valuation.comp_count if valuation else 0,
                 # comp_basis / confidence stay machine-readable; the *_note
@@ -98,10 +129,12 @@ def build_search_response(
                 "delta_pct": valuation.delta_pct if valuation else None,
             }
         )
+    note = coverage_note(result.areas_searched, found_any=bool(result.scored))
     return {
         "snapshot_id": result.snapshot_id,
         "saved_search": result.saved_search,
         "dashboard_url": dashboard_url,
+        **({"coverage": note} if note else {}),
         "results": rows,
         "excluded": result.exclusions,
         "excluded_summary": describe_exclusions(result.exclusions),
@@ -157,6 +190,11 @@ def build_whats_new_response(changes: list[ListingChange]) -> dict:
 
 
 def resolve_center(criteria: Criteria, geocoder) -> tuple[float, float] | None:
+    place = resolve_place(criteria, geocoder)
+    return None if place is None else (place.lat, place.lon)
+
+
+def resolve_place(criteria: Criteria, geocoder):
     """Turn the requested address into the fixed point scoring measures from.
 
     Both failures below are raised rather than absorbed. A radius search that
@@ -171,7 +209,7 @@ def resolve_center(criteria: Criteria, geocoder) -> tuple[float, float] | None:
                 "without the point it is measured from."
             )
         return None
-    located = geocoder.locate(criteria.center_address)
+    located = geocoder.locate_place(criteria.center_address)
     if located is None:
         raise ValueError(
             f"Could not place the address {criteria.center_address!r}. "
@@ -206,6 +244,12 @@ def search(
     that is the "show me some above $200,000 if there is nothing below"
     behaviour, not a bug.
 
+    A search that comes up short in the area it was given widens on its own:
+    to the nearest neighbouring zips, then to the city, stopping at the first
+    that answers. Matches found further out are labelled with the area they
+    came from, and the response carries one line saying how far it went. When
+    nothing turns up anywhere, that line says what was searched.
+
     Pass `center_address` and `radius_miles` to search outward from one
     address instead of by area name. The area still names the net that gets
     fetched — the listing source takes a location string and nothing
@@ -231,7 +275,7 @@ def search(
         center_address=center_address,
         radius_miles=radius_miles,
     )
-    center = resolve_center(criteria, CensusGeocoder())
+    place = resolve_place(criteria, CensusGeocoder())
     db = _db()
     source = ApifyMemo23Source(token=config.apify_token())
     result = run_search(
@@ -240,7 +284,8 @@ def search(
         criteria,
         saved_search=snapshot_key(criteria),
         limit=limit,
-        center=center,
+        center=None if place is None else (place.lat, place.lon),
+        city=None if place is None else place.city,
     )
     base = ensure_dashboard_running(config.dashboard_port())
     return build_search_response(
