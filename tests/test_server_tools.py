@@ -1,4 +1,7 @@
+import pytest
+
 from har_search.core.models import (
+    Criteria,
     Listing,
     ListingChange,
     MoneyRange,
@@ -11,6 +14,7 @@ from har_search.server.__main__ import (
     build_explain_response,
     build_search_response,
     build_whats_new_response,
+    resolve_center,
 )
 
 
@@ -186,3 +190,47 @@ def test_search_response_returns_the_saved_search_key_for_whats_new():
     """Keys carry a hash the model cannot invent, so `search` has to hand it back."""
     payload = build_search_response(make_result(), limit=10, dashboard_url="http://x/run/7")
     assert payload["saved_search"] == "Spring #a1b2c3d4"
+
+
+class StubGeocoder:
+    """Returns a fixed point, or nothing for an address it cannot place."""
+
+    def __init__(self, point=None):
+        self.point = point
+        self.asked = []
+
+    def locate(self, address):
+        self.asked.append(address)
+        return self.point
+
+
+def test_no_address_means_no_center_and_no_geocoder_call():
+    """Area-only searches must not pay for a lookup they do not use."""
+    geocoder = StubGeocoder(point=(29.83, -95.66))
+    criteria = Criteria(area="Spring", beds=3)
+    assert resolve_center(criteria, geocoder) is None
+    assert geocoder.asked == []
+
+
+def test_an_address_is_geocoded_into_a_center():
+    geocoder = StubGeocoder(point=(29.8329, -95.6597))
+    criteria = Criteria(area="Houston", center_address="5255 Beaverbrook Dr")
+    assert resolve_center(criteria, geocoder) == (29.8329, -95.6597)
+    assert geocoder.asked == ["5255 Beaverbrook Dr"]
+
+
+def test_an_unplaceable_address_is_an_error_not_a_silent_area_search():
+    """Falling through to the derived centroid would run a search the user did
+    not ask for and report it as if they had — the radius would quietly stop
+    applying while the response still looked like a radius search."""
+    geocoder = StubGeocoder(point=None)
+    criteria = Criteria(area="Houston", center_address="nowhere at all", radius_miles=2.0)
+    with pytest.raises(ValueError, match="nowhere at all"):
+        resolve_center(criteria, geocoder)
+
+
+def test_a_radius_without_an_address_is_an_error():
+    """A radius has no meaning without the point it is measured from."""
+    criteria = Criteria(area="Houston", radius_miles=2.0)
+    with pytest.raises(ValueError, match="radius_miles"):
+        resolve_center(criteria, StubGeocoder())

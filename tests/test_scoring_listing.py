@@ -197,3 +197,44 @@ def test_no_scoring_detail_or_explanation_contains_a_raw_identifier():
         for param in scored.params:
             assert "_" not in param.detail, f"{param.name}: {param.detail}"
         assert "_" not in scored.why, scored.why
+
+
+# 1.5 miles due north of SPRING: inside the 3-mile geo decay (scores ~0.8, so
+# it survives the `area` must today) but outside a 1-mile radius request.
+NEAR_MISS = dict(lat=30.0817, lon=-95.42, city="Conroe", subdivision="Elsewhere")
+
+
+def test_listing_outside_the_requested_radius_is_dropped():
+    """Without the hard edge this listing scores ~0.8 on area and survives.
+
+    A radius is a boundary, not a preference: asking for one mile and being
+    shown a house 1.5 miles out is the tool overruling the request.
+    """
+    criteria = Criteria(
+        area="Houston",
+        center_address="anywhere",
+        radius_miles=1.0,
+        beds=3,
+        baths=2,
+    )
+    assert score_listing(make_listing(**NEAR_MISS), criteria, SPRING) is None
+
+
+def test_listing_inside_the_requested_radius_survives():
+    criteria = Criteria(
+        area="Houston",
+        center_address="anywhere",
+        radius_miles=5.0,
+        beds=3,
+        baths=2,
+    )
+    scored = score_listing(make_listing(**NEAR_MISS), criteria, SPRING)
+    assert scored is not None
+    assert scored.score > 0.5
+
+
+def test_radius_without_a_centroid_cannot_drop_anything():
+    """No geocode means no boundary. Falling back to dropping everything
+    would turn a failed lookup into an empty result set with no explanation."""
+    criteria = Criteria(area="Spring", center_address="anywhere", radius_miles=0.1)
+    assert score_listing(make_listing(), criteria, None) is not None

@@ -41,6 +41,15 @@ class SearchResult:
     dropped_by_must: int = 0
 
 
+# How long a fetched sold history stays good. Closed sales arrive in a
+# trickle and the comps tiers already look back 180-365 days, so a week-old
+# set moves an estimate by nothing a reader would notice. The cost it saves is
+# not small: the sold leg is a second actor run, and running both leaves a
+# search past the client's deadline while the work completes anyway — the
+# caller is told the search failed and the rows land in the database.
+SOLD_REFRESH_DAYS = 7
+
+
 def _area_centroid(listings: list[Listing]) -> tuple[float, float] | None:
     points = [(l.lat, l.lon) for l in listings if l.lat is not None and l.lon is not None]
     if not points:
@@ -51,6 +60,13 @@ def _area_centroid(listings: list[Listing]) -> tuple[float, float] | None:
     )
 
 
+def _sold_history_is_stale(db, area: str, today: date) -> bool:
+    last = db.sold_fetched_on(area)
+    if last is None:
+        return True
+    return (today - date.fromisoformat(last)).days >= SOLD_REFRESH_DAYS
+
+
 def run_search(
     source,
     db: Database,
@@ -58,6 +74,7 @@ def run_search(
     saved_search: str | None = None,
     limit: int = 25,
     today: date | None = None,
+    center: tuple[float, float] | None = None,
 ) -> SearchResult:
     today = today or date.today()
     # Snapshots are keyed on the criteria, not the area. Keying on the area
@@ -74,14 +91,19 @@ def run_search(
     # 1. Sold history first, so comps are available for this run's listings.
     sold_exclusions: Counter[str] = Counter()
     sales: list = []
-    for raw in source.fetch_sold(area=criteria.area):
-        result = normalize_sale(raw)
-        if result.sale is None:
-            sold_exclusions[result.exclusion or "unknown"] += 1
-            continue
-        sales.append(result.sale)
-    if sales:
-        db.upsert_sales(sales)
+    if _sold_history_is_stale(db, criteria.area, today):
+        for raw in source.fetch_sold(area=criteria.area):
+            result = normalize_sale(raw)
+            if result.sale is None:
+                sold_exclusions[result.exclusion or "unknown"] += 1
+                continue
+            sales.append(result.sale)
+        if sales:
+            db.upsert_sales(sales)
+        # Recorded even when the fetch returned nothing usable. An area with no
+        # published sales would otherwise re-run the same empty leg on every
+        # search, paying full latency for a result already known.
+        db.record_sold_fetch(criteria.area, today.isoformat())
 
     # 2. For-sale rows, normalized with every exclusion counted.
     exclusions: Counter[str] = Counter()
@@ -94,7 +116,12 @@ def run_search(
         listings.append(result.listing)
 
     # 3. Score. A listing failing a `must` parameter is removed, and counted.
-    centroid = _area_centroid(listings)
+    # A supplied center wins over the derived one. `_area_centroid` averages
+    # the listings the fetch returned, which is circular — it describes where
+    # the fetch landed, not where the user asked about, so it cannot correct
+    # a fetch that resolved to the wrong place. It stays as the fallback for
+    # searches that name an area and no address.
+    centroid = center or _area_centroid(listings)
     scored: list[ScoredListing] = []
     dropped_by_must = 0
     for listing in listings:

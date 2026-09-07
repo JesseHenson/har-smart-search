@@ -40,6 +40,7 @@ from har_search.core.labels import (
 from har_search.core.models import Criteria, ListingChange
 from har_search.pipeline import SearchResult, run_search
 from har_search.sources.apify_memo23 import ApifyMemo23Source
+from har_search.sources.geocode import CensusGeocoder
 from har_search.store.db import Database
 from har_search.web.app import ensure_dashboard_running
 
@@ -155,6 +156,30 @@ def build_whats_new_response(changes: list[ListingChange]) -> dict:
     return {**buckets, "unchanged_count": unchanged}
 
 
+def resolve_center(criteria: Criteria, geocoder) -> tuple[float, float] | None:
+    """Turn the requested address into the fixed point scoring measures from.
+
+    Both failures below are raised rather than absorbed. A radius search that
+    quietly degrades into an area search is the worst outcome available here:
+    the caller still gets a ranked list, still gets a `saved_search` key, and
+    has no way to see that the boundary they asked for was never applied.
+    """
+    if criteria.center_address is None:
+        if criteria.radius_miles is not None:
+            raise ValueError(
+                "radius_miles needs a center_address — a radius has no meaning "
+                "without the point it is measured from."
+            )
+        return None
+    located = geocoder.locate(criteria.center_address)
+    if located is None:
+        raise ValueError(
+            f"Could not place the address {criteria.center_address!r}. "
+            "Check the spelling, or search by area instead."
+        )
+    return located
+
+
 @mcp.tool()
 def search(
     area: str,
@@ -167,6 +192,8 @@ def search(
     property_types: list[str] | None = None,
     no_hoa: bool | None = None,
     max_age_years: int | None = None,
+    center_address: str | None = None,
+    radius_miles: float | None = None,
     limit: int = 25,
 ) -> dict:
     """Search HAR listings by loose criteria and rank them by similarity.
@@ -178,6 +205,14 @@ def search(
     Listings over the stated budget are included on purpose, ranked lower —
     that is the "show me some above $200,000 if there is nothing below"
     behaviour, not a bug.
+
+    Pass `center_address` and `radius_miles` to search outward from one
+    address instead of by area name. The area still names the net that gets
+    fetched — the listing source takes a location string and nothing
+    geographic — while the radius decides what survives: a listing past it is
+    dropped outright rather than ranked low, and a matching city or
+    subdivision name does not buy its way back in. An address that cannot be
+    geocoded is an error, not a fallback to an area search.
 
     The response carries a `saved_search` key. Pass that same key to
     `whats_new` to compare this search against its own previous run.
@@ -193,11 +228,19 @@ def search(
         property_types=property_types,
         no_hoa=no_hoa,
         max_age_years=max_age_years,
+        center_address=center_address,
+        radius_miles=radius_miles,
     )
+    center = resolve_center(criteria, CensusGeocoder())
     db = _db()
     source = ApifyMemo23Source(token=config.apify_token())
     result = run_search(
-        source, db, criteria, saved_search=snapshot_key(criteria), limit=limit
+        source,
+        db,
+        criteria,
+        saved_search=snapshot_key(criteria),
+        limit=limit,
+        center=center,
     )
     base = ensure_dashboard_running(config.dashboard_port())
     return build_search_response(

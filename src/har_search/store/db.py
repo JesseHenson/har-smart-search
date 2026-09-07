@@ -297,6 +297,27 @@ class Database:
             )
         self._conn.commit()
 
+    def sold_fetched_on(self, area: str) -> str | None:
+        """The date the sold leg last ran for this area, or None.
+
+        Keyed on the area string the vendor was actually asked for, not on the
+        listings that came back: the question asked is what can be repeated,
+        and two searches naming the same area share the answer.
+        """
+        row = self._conn.execute(
+            "SELECT fetched_on FROM sold_fetches WHERE area = ?",
+            (area.strip().lower(),),
+        ).fetchone()
+        return row["fetched_on"] if row else None
+
+    def record_sold_fetch(self, area: str, fetched_on: str) -> None:
+        self._conn.execute(
+            "INSERT INTO sold_fetches (area, fetched_on) VALUES (?, ?)"
+            " ON CONFLICT(area) DO UPDATE SET fetched_on = excluded.fetched_on",
+            (area.strip().lower(), fetched_on),
+        )
+        self._conn.commit()
+
     def sales_near(
         self, lat: float, lon: float, miles: float, since: date
     ) -> list[Sale]:

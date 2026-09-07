@@ -50,3 +50,8 @@ CREATE TABLE IF NOT EXISTS sold_history (
 CREATE INDEX IF NOT EXISTS idx_sold_geo ON sold_history (lat, lon);
 CREATE INDEX IF NOT EXISTS idx_sold_sub ON sold_history (subdivision, sold_date);
 CREATE INDEX IF NOT EXISTS idx_snapshot_search ON snapshots (saved_search, run_at);
+
+CREATE TABLE IF NOT EXISTS sold_fetches (
+  area TEXT PRIMARY KEY,
+  fetched_on TEXT NOT NULL
+);

@@ -112,6 +112,14 @@ class Criteria:
     no_hoa: bool | None = None
     max_age_years: int | None = None
     min_school_rating: str | None = None
+    # Radius search. `area` still names the net the vendor fetches — the
+    # actor takes a location string and nothing geographic — while these two
+    # decide what survives. `center_address` is geocoded by the caller and
+    # handed to scoring as the centroid; `radius_miles` turns the geo decay
+    # into a hard edge, so a listing past it fails the `area` must outright
+    # rather than merely ranking low.
+    center_address: str | None = None
+    radius_miles: float | None = None
     # Location is the only hard default. Budget is deliberately SOFT: spec 5.2
     # advertises graceful decay to +50% over budget as a rankable outcome
     # ("then you may show me some houses above $200,000, if the search result

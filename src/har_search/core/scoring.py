@@ -172,7 +172,28 @@ def score_listing(
     miles = None
     if area_centroid and listing.lat is not None and listing.lon is not None:
         miles = _haversine_miles(area_centroid[0], area_centroid[1], listing.lat, listing.lon)
-    if subdivision_match or miles is not None:
+    # A radius is a boundary, not a preference. Past it the parameter scores
+    # zero rather than decaying, so `area` in `must` removes the listing
+    # outright. The name match cannot rescue it: asking for one mile around an
+    # address and being handed a house two miles away because it shares a
+    # subdivision name is the tool overruling the request. With no centroid
+    # there is no boundary to enforce, and the decay behaviour stands.
+    outside_radius = (
+        criteria.radius_miles is not None
+        and miles is not None
+        and miles > criteria.radius_miles
+    )
+    if outside_radius:
+        params.append(
+            _param(
+                "area",
+                0.0,
+                weight,
+                True,
+                f"{miles:.1f} mi out, past the {criteria.radius_miles:g} mi radius",
+            )
+        )
+    elif subdivision_match or miles is not None:
         params.append(
             _param(
                 "area",

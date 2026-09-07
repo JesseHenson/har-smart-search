@@ -42,6 +42,8 @@ def _normalized(criteria: Criteria) -> dict:
         "no_hoa": criteria.no_hoa,
         "max_age_years": criteria.max_age_years,
         "min_school_rating": criteria.min_school_rating,
+        "center_address": (criteria.center_address or "").strip().lower(),
+        "radius_miles": criteria.radius_miles,
         "must": sorted(criteria.must or []),
         "weights": dict(sorted((criteria.weights or {}).items())),
     }

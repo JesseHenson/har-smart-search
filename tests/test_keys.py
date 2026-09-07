@@ -82,3 +82,20 @@ def test_resolve_reports_an_unknown_search_rather_than_returning_nothing():
     key, error = resolve_saved_search("Katy", ["Spring #aaaaaaaa"])
     assert key is None
     assert "Katy" in error
+
+
+def test_two_radii_around_the_same_address_get_different_keys():
+    """A 1-mile and a 5-mile search around one address are different questions.
+
+    Sharing a bucket would make `whats_new` diff the tight search against the
+    wide one and report the ring between them as entirely NEW.
+    """
+    tight = Criteria(area="Houston", center_address="5255 Beaverbrook Dr", radius_miles=1.0)
+    wide = Criteria(area="Houston", center_address="5255 Beaverbrook Dr", radius_miles=5.0)
+    assert snapshot_key(tight) != snapshot_key(wide)
+
+
+def test_two_addresses_at_the_same_radius_get_different_keys():
+    one = Criteria(area="Houston", center_address="5255 Beaverbrook Dr", radius_miles=2.0)
+    other = Criteria(area="Houston", center_address="1643 Park Harbor Estates Dr", radius_miles=2.0)
+    assert snapshot_key(one) != snapshot_key(other)
