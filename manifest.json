@@ -2,7 +2,7 @@
   "manifest_version": "0.1",
   "name": "har-smart-search",
   "display_name": "HAR Smart Search",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Similarity search and comparable-sales valuation over HAR listings.",
   "author": {
     "name": "Jesse Henson"
@@ -23,6 +23,14 @@
     }
   },
   "tools": [
+    {
+      "name": "getting_started",
+      "description": "Start here \u2014 walks through a first search end to end and sets up a weekly schedule."
+    },
+    {
+      "name": "plan_search",
+      "description": "Build a complete set of search criteria before running anything."
+    },
     {
       "name": "search",
       "description": "Search HAR listings by loose criteria and rank by similarity."

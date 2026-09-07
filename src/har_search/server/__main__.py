@@ -268,22 +268,11 @@ def open_dashboard() -> dict:
     return {"dashboard_url": ensure_dashboard_running(config.dashboard_port())}
 
 
-@mcp.prompt(
-    name="getting_started",
-    title="Set up my first HAR search",
-    description="Walk through a first search end to end: gather criteria, run it, "
-    "explain the dashboard, and offer a weekly schedule.",
-)
-def getting_started() -> str:
-    """First-run guidance.
-
-    Onboarding is not "the extension is installed" — it is "the user has
-    looked at real houses and understood the value column". Criteria are
-    gathered in conversation rather than on an empty dashboard, because a
-    blank form asks the user to guess what good input looks like, and the
-    first thing they should see is a ranked list of real listings.
-    """
-    return """Help me set up my first HAR Smart Search. Work through these in order,
+# The walkthroughs live here rather than inside a decorated function because
+# each is served twice: as an MCP prompt (Claude Desktop's attachment menu)
+# and as a tool (reachable by simply asking). Two copies would drift, and the
+# drift would be invisible because nobody reads both.
+GETTING_STARTED = """Help me set up my first HAR Smart Search. Work through these in order,
 one step at a time, and wait for me between steps.
 
 1. Ask me what I am looking for in plain language, then fill in the five
@@ -314,22 +303,7 @@ one step at a time, and wait for me between steps.
 6. Finish with what I can do next: adjust criteria and re-run, add a second
    saved search for a different area, or ask `explain` about any listing."""
 
-
-@mcp.prompt(
-    name="plan_search",
-    title="Build a good search from scratch",
-    description="Assemble a complete, well-formed set of search criteria before "
-    "running anything.",
-)
-def plan_search() -> str:
-    """Criteria-building guidance.
-
-    A two-parameter search ranks almost arbitrarily: with little to compare
-    on, near-identical scores come back in essentially source order, and the
-    result reads as noise. This prompt exists to get a full criteria set in
-    place before the first run rather than after a disappointing one.
-    """
-    return """Help me build a complete HAR search before running it. Ask me about
+PLAN_SEARCH = """Help me build a complete HAR search before running it. Ask me about
 each of these, one message at a time, and suggest a sensible default when I
 am unsure.
 
@@ -354,6 +328,61 @@ townhouse/condo, multi-family, lots), and whether I need to exclude HOAs.
 Then read the whole set back to me in one short list, flag anything missing
 that would weaken the ranking, and once I confirm, call `search` with it and
 tell me the saved search key it returns."""
+
+
+@mcp.tool()
+def getting_started() -> str:
+    """Start here. Walks through a first HAR search end to end: gather
+    criteria, run the search, explain the dashboard, and set up a weekly
+    schedule. Call this when the user is new to this extension or asks how
+    to begin.
+    """
+    return GETTING_STARTED
+
+
+@mcp.tool()
+def plan_search() -> str:
+    """Build a complete set of search criteria before running anything.
+    Call this when the user wants help deciding what to search for, or has
+    given only one or two criteria — a thin search ranks close to
+    arbitrarily and reads as noise.
+    """
+    return PLAN_SEARCH
+
+
+@mcp.prompt(
+    name="getting_started",
+    title="Set up my first HAR search",
+    description="Walk through a first search end to end: gather criteria, run it, "
+    "explain the dashboard, and offer a weekly schedule.",
+)
+def getting_started_prompt() -> str:
+    """First-run guidance.
+
+    Onboarding is not "the extension is installed" — it is "the user has
+    looked at real houses and understood the value column". Criteria are
+    gathered in conversation rather than on an empty dashboard, because a
+    blank form asks the user to guess what good input looks like, and the
+    first thing they should see is a ranked list of real listings.
+    """
+    return GETTING_STARTED
+
+
+@mcp.prompt(
+    name="plan_search",
+    title="Build a good search from scratch",
+    description="Assemble a complete, well-formed set of search criteria before "
+    "running anything.",
+)
+def plan_search_prompt() -> str:
+    """Criteria-building guidance.
+
+    A two-parameter search ranks almost arbitrarily: with little to compare
+    on, near-identical scores come back in essentially source order, and the
+    result reads as noise. This prompt exists to get a full criteria set in
+    place before the first run rather than after a disappointing one.
+    """
+    return PLAN_SEARCH
 
 
 def main() -> None:
