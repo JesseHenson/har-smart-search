@@ -137,7 +137,8 @@
 > first-class citizen, so tests never need a network.
 
 ## Onboarding
-- **Ships as a skill inside the bundle** — Claude follows it on first use, then stays out of the way
+- **Ships as an MCP prompt, not a skill** — the MCPB manifest schema allows `tools` and `prompts` only; Desktop lists prompts as commands
+- **Two prompts**: `getting_started` walks the first run end to end, `plan_search` assembles a full criteria set before running anything
 - **Creating the weekly schedule is its job** — the bundle cannot schedule anything itself
 - **Done means the user has seen real results** — dashboard published, one saved search in it, weekly schedule live
 - **The walkthrough is most of it** — pull the dashboard up and explain the columns, especially what the delta and the match badge mean

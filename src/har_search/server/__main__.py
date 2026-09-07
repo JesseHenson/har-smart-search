@@ -268,6 +268,94 @@ def open_dashboard() -> dict:
     return {"dashboard_url": ensure_dashboard_running(config.dashboard_port())}
 
 
+@mcp.prompt(
+    name="getting_started",
+    title="Set up my first HAR search",
+    description="Walk through a first search end to end: gather criteria, run it, "
+    "explain the dashboard, and offer a weekly schedule.",
+)
+def getting_started() -> str:
+    """First-run guidance.
+
+    Onboarding is not "the extension is installed" — it is "the user has
+    looked at real houses and understood the value column". Criteria are
+    gathered in conversation rather than on an empty dashboard, because a
+    blank form asks the user to guess what good input looks like, and the
+    first thing they should see is a ranked list of real listings.
+    """
+    return """Help me set up my first HAR Smart Search. Work through these in order,
+one step at a time, and wait for me between steps.
+
+1. Ask me what I am looking for in plain language, then fill in the five
+   criteria that actually drive ranking: area, max price, beds, baths and
+   square footage. A target price per square foot is optional and useful.
+   If I skip one, ask once, then move on — missing criteria lower coverage
+   rather than breaking the search.
+
+2. Call `search` with what we have. Tell me how many listings came back and
+   how many were excluded, and mention that listings over my budget are
+   included on purpose, ranked lower.
+
+3. Call `open_dashboard` and give me the URL. Walk me through one row:
+   - the similarity score and what got stretched to earn it
+   - the value KPI: the dollar gap between asking price and comparable sales
+   - the confidence label, and that "low" means thin comp evidence, not a
+     bad house
+   - coverage, which counts how many of my criteria the listing published
+
+4. Explain that comps come from recent sales near the listing, so a house
+   with few nearby sales of similar size will show no estimate at all. That
+   is the tool refusing to guess.
+
+5. Offer to schedule this weekly. If I say yes, set up a scheduled task that
+   re-runs the search and reports what is new, then tell me the saved search
+   key so `whats_new` can diff runs.
+
+6. Finish with what I can do next: adjust criteria and re-run, add a second
+   saved search for a different area, or ask `explain` about any listing."""
+
+
+@mcp.prompt(
+    name="plan_search",
+    title="Build a good search from scratch",
+    description="Assemble a complete, well-formed set of search criteria before "
+    "running anything.",
+)
+def plan_search() -> str:
+    """Criteria-building guidance.
+
+    A two-parameter search ranks almost arbitrarily: with little to compare
+    on, near-identical scores come back in essentially source order, and the
+    result reads as noise. This prompt exists to get a full criteria set in
+    place before the first run rather than after a disappointing one.
+    """
+    return """Help me build a complete HAR search before running it. Ask me about
+each of these, one message at a time, and suggest a sensible default when I
+am unsure.
+
+Scoring criteria — these move the ranking:
+- area: a city or neighbourhood, e.g. Spring. This is the only hard filter;
+  everything else is soft.
+- max price: treated as a soft ceiling. Listings above it still appear,
+  ranked lower, so give me your real number rather than padding it.
+- beds and baths: targets, not minimums. A 4-bed can outrank a 3-bed when
+  everything else fits better.
+- sqft: the size you actually want. This one also gates which sold homes
+  count as comparable, so a wrong number quietly weakens the value estimate.
+- price per square foot: optional target. Useful when I care more about
+  value than absolute price.
+
+Context only — these appear on results but never change rank:
+- garage, house age, HOA, property type.
+
+Also ask whether I want to restrict property types (single family,
+townhouse/condo, multi-family, lots), and whether I need to exclude HOAs.
+
+Then read the whole set back to me in one short list, flag anything missing
+that would weaken the ranking, and once I confirm, call `search` with it and
+tell me the saved search key it returns."""
+
+
 def main() -> None:
     mcp.run()
 
