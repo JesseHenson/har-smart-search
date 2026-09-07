@@ -27,49 +27,23 @@ _TYPE_TO_ACTOR = {
 }
 
 # This is a similarity finder, not a filter (see core/scoring.py). The
-# vendor-side window below only caps fetch volume; client-side scoring
-# stays the authority on ranking. Each factor mirrors the point in the
-# scoring curve past which a listing can no longer rank meaningfully.
+def corpus_actor_input(area: str, limit: int) -> dict:
+    """Everything for sale in one area, unfiltered.
 
-# ceiling_score (tau=CEILING_TAU=0.16) has decayed to ~0.29 at 25% over
-# the ceiling — widen maxPrice/maxPricePerSqft that far so the tolerant
-# tail scoring describes can actually be fetched.
-CEILING_WIDEN_FACTOR = 1.25
-
-# target_score's tau_under for beds/baths (0.82) puts one unit below
-# target at ~0.40 — drop the vendor-side minimum by one unit to match,
-# floored at 1 so the payload never asks for zero or negative rooms.
-TARGET_MIN_STEPDOWN = 1
-
-
-def criteria_to_actor_input(criteria: Criteria, limit: int) -> dict:
-    payload: dict = {
+    Deliberately criteria-free. Passing the caller's budget or bed count to
+    the vendor is what made the active comp pool circular — the pool was drawn
+    from the same narrowed fetch that produced the results, so a house was
+    only ever compared against houses inside the budget it was being judged
+    against. Filtering happens locally, against the whole neighbourhood.
+    """
+    return {
         "listingType": "sale",
-        "locations": [criteria.area],
+        "locations": [area],
         "includeDetails": True,
         "includeAvm": True,
         "maxItems": limit,
         "sortBy": "newest",
     }
-    if criteria.beds is not None:
-        payload["minBeds"] = max(1, criteria.beds - TARGET_MIN_STEPDOWN)
-    if criteria.baths is not None:
-        payload["minBaths"] = max(1, criteria.baths - TARGET_MIN_STEPDOWN)
-    if criteria.max_price is not None:
-        payload["maxPrice"] = int(criteria.max_price * CEILING_WIDEN_FACTOR)
-    if criteria.max_price_per_sqft is not None:
-        payload["maxPricePerSqft"] = int(criteria.max_price_per_sqft * CEILING_WIDEN_FACTOR)
-    if criteria.sqft is not None:
-        payload["minSqft"] = int(criteria.sqft * 0.75)
-    if criteria.property_types:
-        mapped = {
-            _TYPE_TO_ACTOR[value]
-            for value in criteria.property_types
-            if value in _TYPE_TO_ACTOR
-        }
-        if mapped:
-            payload["propertyTypes"] = sorted(mapped)
-    return payload
 
 
 class ApifyMemo23Source:
@@ -102,8 +76,8 @@ class ApifyMemo23Source:
         response.raise_for_status()
         return response.json()
 
-    def fetch_for_sale(self, criteria: Criteria, limit: int) -> list[dict]:
-        return self._run(criteria_to_actor_input(criteria, limit))
+    def fetch_corpus(self, area: str, limit: int) -> list[dict]:
+        return self._run(corpus_actor_input(area, limit))
 
     def fetch_sold(self, area: str, agent_depth: int = 25, limit: int = 200) -> list[dict]:
         return self._run(

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from har_search.core.diff import diff_snapshots
@@ -75,7 +75,7 @@ class FixtureSource:
         self.for_sale += deepcopy(extra_for_sale or [])
         self.sold = json.loads((FIXTURES / "sold_spring.json").read_text())
 
-    def fetch_for_sale(self, criteria, limit):
+    def fetch_corpus(self, area, limit):
         return self.for_sale
 
     def fetch_sold(self, area, agent_depth=25, limit=200):
@@ -203,7 +203,12 @@ def test_a_second_run_reports_what_changed_since_the_first(tmp_path):
     for row in later.for_sale:
         if row["listingId"] == "F1":
             row["price"] = 199_000
-    week_two = run_search(source=later, db=db, criteria=criteria, today=TODAY)
+    # A week later, not the same afternoon. The corpus is cached per area,
+    # so a diff is a diff between refreshes: two searches on one day see
+    # the same data because the market data really has not been re-read.
+    week_two = run_search(
+        source=later, db=db, criteria=criteria, today=TODAY + timedelta(days=7)
+    )
 
     assert week_two.saved_search == week_one.saved_search, (
         "the same criteria must land in the same bucket week to week"

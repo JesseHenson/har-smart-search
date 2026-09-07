@@ -55,3 +55,40 @@ CREATE TABLE IF NOT EXISTS sold_fetches (
   area TEXT PRIMARY KEY,
   fetched_on TEXT NOT NULL
 );
+
+-- The corpus: every active listing ever fetched for any area, keyed on the
+-- listing rather than the run that found it. `listings` records which
+-- listings a snapshot returned; this records what exists to be searched.
+CREATE TABLE IF NOT EXISTS active_listings (
+  listing_id TEXT PRIMARY KEY,
+  mls_number TEXT,
+  address TEXT, city TEXT, zip TEXT, subdivision TEXT,
+  lat REAL, lon REAL,
+  price INTEGER, price_per_sqft REAL,
+  beds INTEGER, baths_full INTEGER, baths_half INTEGER,
+  sqft INTEGER, lot_sqft INTEGER, year_built INTEGER,
+  garage_spaces INTEGER, garage_attached INTEGER, garage_tags_json TEXT,
+  hoa_monthly REAL,
+  property_type TEXT, duplex_scope TEXT, status TEXT, days_on_market INTEGER,
+  school_rating REAL, tax_rate REAL,
+  appraisal_low INTEGER, appraisal_high INTEGER,
+  url TEXT, flags_json TEXT,
+  first_seen TEXT NOT NULL,
+  last_seen TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_active_geo ON active_listings (lat, lon);
+
+CREATE TABLE IF NOT EXISTS corpus_fetches (
+  area TEXT PRIMARY KEY,
+  fetched_on TEXT NOT NULL
+);
+
+-- Which areas a corpus listing was found under. The corpus is a union of
+-- area fetches, not one pile: a search for one area must not rank another
+-- area's listings just because both happen to be cached.
+CREATE TABLE IF NOT EXISTS corpus_areas (
+  area TEXT NOT NULL,
+  listing_id TEXT NOT NULL,
+  PRIMARY KEY (area, listing_id)
+);

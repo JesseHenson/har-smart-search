@@ -297,6 +297,129 @@ class Database:
             )
         self._conn.commit()
 
+    def upsert_actives(self, listings: list[Listing], seen_on: str | None = None) -> None:
+        """Fold a refresh into the corpus.
+
+        `first_seen` is excluded from the update clause so the original
+        discovery date survives — it is the only record of how long something
+        has been on the market once days_on_market resets on a relist.
+        `last_seen` moves every time, and is what makes a listing that stopped
+        appearing visibly stale rather than quietly wrong.
+        """
+        now = seen_on or datetime.now().isoformat(timespec="seconds")
+        for listing in listings:
+            garage = listing.garage
+            self._conn.execute(
+                "INSERT INTO active_listings (listing_id, mls_number, address, city, zip, subdivision, lat, lon, price, price_per_sqft, beds, baths_full, baths_half, sqft, lot_sqft, year_built, garage_spaces, garage_attached, garage_tags_json, hoa_monthly, property_type, duplex_scope, status, days_on_market, school_rating, tax_rate, appraisal_low, appraisal_high, url, flags_json, first_seen, last_seen)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(listing_id) DO UPDATE SET mls_number=excluded.mls_number, address=excluded.address, city=excluded.city, zip=excluded.zip, subdivision=excluded.subdivision, lat=excluded.lat, lon=excluded.lon, price=excluded.price, price_per_sqft=excluded.price_per_sqft, beds=excluded.beds, baths_full=excluded.baths_full, baths_half=excluded.baths_half, sqft=excluded.sqft, lot_sqft=excluded.lot_sqft, year_built=excluded.year_built, garage_spaces=excluded.garage_spaces, garage_attached=excluded.garage_attached, garage_tags_json=excluded.garage_tags_json, hoa_monthly=excluded.hoa_monthly, property_type=excluded.property_type, duplex_scope=excluded.duplex_scope, status=excluded.status, days_on_market=excluded.days_on_market, school_rating=excluded.school_rating, tax_rate=excluded.tax_rate, appraisal_low=excluded.appraisal_low, appraisal_high=excluded.appraisal_high, url=excluded.url, flags_json=excluded.flags_json, last_seen=excluded.last_seen",
+                (
+                    listing.listing_id,
+                    listing.mls_number,
+                    listing.address,
+                    listing.city,
+                    listing.zip,
+                    listing.subdivision,
+                    listing.lat,
+                    listing.lon,
+                    listing.price,
+                    listing.price_per_sqft,
+                    listing.beds,
+                    listing.baths_full,
+                    listing.baths_half,
+                    listing.sqft,
+                    listing.lot_sqft,
+                    listing.year_built,
+                    garage.spaces if garage else None,
+                    None if garage is None or garage.attached is None else int(garage.attached),
+                    json.dumps(list(garage.tags)) if garage else None,
+                    listing.hoa.monthly_usd if listing.hoa else None,
+                    listing.property_type.value if listing.property_type else None,
+                    listing.duplex_scope.value if listing.duplex_scope else None,
+                    listing.status,
+                    listing.days_on_market,
+                    listing.school_rating,
+                    listing.tax_rate,
+                    listing.appraisal.low if listing.appraisal else None,
+                    listing.appraisal.high if listing.appraisal else None,
+                    listing.url,
+                    json.dumps(list(listing.flags)),
+                    now,
+                    now,
+                ),
+            )
+        self._conn.commit()
+
+    def tag_corpus_area(self, area: str, listing_ids: list[str]) -> None:
+        for listing_id in listing_ids:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO corpus_areas (area, listing_id) VALUES (?, ?)",
+                (area.strip().lower(), listing_id),
+            )
+        self._conn.commit()
+
+    def actives_in_area(self, area: str) -> list[Listing]:
+        """Listings the most recent refresh of this area actually returned.
+
+        A refresh is authoritative about its own area, so `last_seen` is
+        compared against the area's own fetch date rather than a window: a row
+        the latest refresh did not mention is not for sale there any more,
+        whatever the cache still holds.
+        """
+        rows = self._conn.execute(
+            "SELECT a.* FROM active_listings a"
+            " JOIN corpus_areas c ON c.listing_id = a.listing_id"
+            " JOIN corpus_fetches f ON f.area = c.area"
+            " WHERE c.area = ? AND a.last_seen >= f.fetched_on",
+            (area.strip().lower(),),
+        ).fetchall()
+        return [self._row_to_listing(row) for row in rows]
+
+    def actives_near(
+        self, lat: float, lon: float, miles: float, seen_since: str | None = None
+    ) -> list[Listing]:
+        """Corpus listings within `miles`, by real distance.
+
+        Bounding box first, haversine second — the same shape as `sales_near`,
+        because the two pools answer the same question about different data.
+        """
+        degrees = miles / 55.0
+        # An asking comp has to still be asking. A row last seen before the
+        # cutoff may have sold or been withdrawn, and pricing a house against
+        # a listing that no longer exists is worse than having no comp at all.
+        sql = (
+            "SELECT * FROM active_listings"
+            " WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"
+        )
+        params = [lat - degrees, lat + degrees, lon - degrees, lon + degrees]
+        if seen_since is not None:
+            sql += " AND last_seen >= ?"
+            params.append(seen_since)
+        rows = self._conn.execute(sql, params).fetchall()
+        found = []
+        for row in rows:
+            if row["lat"] is None or row["lon"] is None:
+                continue
+            if haversine_miles(lat, lon, row["lat"], row["lon"]) > miles:
+                continue
+            found.append(self._row_to_listing(row))
+        return found
+
+    def corpus_fetched_on(self, area: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT fetched_on FROM corpus_fetches WHERE area = ?",
+            (area.strip().lower(),),
+        ).fetchone()
+        return row["fetched_on"] if row else None
+
+    def record_corpus_fetch(self, area: str, fetched_on: str) -> None:
+        self._conn.execute(
+            "INSERT INTO corpus_fetches (area, fetched_on) VALUES (?, ?)"
+            " ON CONFLICT(area) DO UPDATE SET fetched_on = excluded.fetched_on",
+            (area.strip().lower(), fetched_on),
+        )
+        self._conn.commit()
+
     def sold_fetched_on(self, area: str) -> str | None:
         """The date the sold leg last ran for this area, or None.
 

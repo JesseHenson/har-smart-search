@@ -3,7 +3,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from har_search.core.models import Criteria
-from har_search.pipeline import SOLD_REFRESH_DAYS, run_search
+from har_search.core.models import Listing, PropertyType
+from har_search.pipeline import CORPUS_LIMIT, SOLD_REFRESH_DAYS, run_search
 from har_search.store.db import Database
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -17,7 +18,7 @@ class FixtureSource:
         self.for_sale = json.loads((FIXTURES / "for_sale_spring.json").read_text())
         self.sold = json.loads((FIXTURES / "sold_spring.json").read_text())
 
-    def fetch_for_sale(self, criteria, limit):
+    def fetch_corpus(self, area, limit):
         return self.for_sale
 
     def fetch_sold(self, area, agent_depth=25, limit=200):
@@ -224,24 +225,25 @@ class CountingSource(FixtureSource):
     def __init__(self):
         super().__init__()
         self.sold_calls = []
-        self.for_sale_calls = 0
+        self.corpus_calls = []
 
     def fetch_sold(self, area, agent_depth=25, limit=200):
         self.sold_calls.append(area)
         return self.sold
 
-    def fetch_for_sale(self, criteria, limit):
-        self.for_sale_calls += 1
+    def fetch_corpus(self, area, limit):
+        self.corpus_calls.append((area, limit))
         return self.for_sale
 
 
-def run(source, db, area="Spring", today=TODAY, **kwargs):
+def run(source, db, area="Spring", today=TODAY, center=None, **kwargs):
     return run_search(
         source=source,
         db=db,
         criteria=Criteria(area=area, max_price=250_000, **kwargs),
         limit=25,
         today=today,
+        center=center,
     )
 
 
@@ -253,7 +255,7 @@ def test_sold_history_is_not_refetched_for_the_same_area_the_same_day(tmp_path):
     run(source, db)
     run(source, db)
     assert source.sold_calls == ["Spring"]
-    assert source.for_sale_calls == 2
+    assert len(source.corpus_calls) == 1
 
 
 def test_stale_sold_history_is_refetched(tmp_path):
@@ -271,3 +273,128 @@ def test_freshness_is_tracked_per_area(tmp_path):
     run(source, db, area="Spring")
     run(source, db, area="Katy")
     assert source.sold_calls == ["Spring", "Katy"]
+
+
+class CorpusSource(CountingSource):
+    """Alias kept for the inversion tests; CountingSource counts both legs."""
+
+
+def test_a_fresh_corpus_costs_no_vendor_calls_at_all(tmp_path):
+    """The point of the inversion. Once an area is cached, changing the
+    criteria is a local question — no actor run, so no deadline to miss."""
+    source, db = CorpusSource(), make_db(tmp_path)
+    run(source, db, area="Spring")
+    calls_after_first = (len(source.corpus_calls), len(source.sold_calls))
+    run(source, db, area="Spring", beds=4)
+    assert (len(source.corpus_calls), len(source.sold_calls)) == calls_after_first
+
+
+def test_results_come_from_the_corpus_not_from_this_run(tmp_path):
+    """The second search fetches nothing and still answers."""
+    source, db = CorpusSource(), make_db(tmp_path)
+    run(source, db, area="Spring")
+    result = run(source, db, area="Spring", beds=3)
+    assert source.corpus_calls == [("Spring", CORPUS_LIMIT)]
+    assert [s.listing.address for s in result.scored]
+
+
+def test_an_area_with_a_corpus_of_its_own_does_not_borrow_another_areas(tmp_path):
+    """The corpus is a union of areas, not one undifferentiated pile.
+
+    Scoping candidates to the area asked for is what keeps a Katy search from
+    ranking Spring houses: with the vendor no longer filtering by area, the
+    only thing standing between the two is this. Empty is the correct answer
+    here — it says the area has not been fetched, which the caller can fix.
+    """
+    source, db = CorpusSource(), make_db(tmp_path)
+    run(source, db, area="Spring")
+    db.record_corpus_fetch("Katy", TODAY.isoformat())
+    result = run(source, db, area="Katy")
+    assert result.scored == []
+
+
+def test_listings_the_search_rejected_still_serve_as_comps(tmp_path):
+    """The circularity, expressed as a test.
+
+    The comp pool used to be this run's own survivors, so anything the search
+    filtered out was also invisible to the valuation — the estimate could not
+    see the market it was supposedly measuring against. Here the two
+    neighbours sit 1.4 miles out: past the half-mile radius the caller asked
+    for, so they are correctly absent from the results, and well inside the
+    two-mile comp radius, so they are exactly the evidence the estimate needs.
+    """
+    db = make_db(tmp_path)
+    subject = make_active("subject", 30.0362, -95.3424, price=245_000)
+    neighbours = [
+        make_active("neighbour-1", 30.0565, -95.3424, price=525_000, sqft=1600),
+        make_active("neighbour-2", 30.0566, -95.3425, price=498_000, sqft=1560),
+    ]
+    db.upsert_actives([subject, *neighbours])
+    db.tag_corpus_area("Spring", [l.listing_id for l in [subject, *neighbours]])
+    db.record_corpus_fetch("Spring", TODAY.isoformat())
+
+    result = run(
+        CorpusSource(),
+        db,
+        area="Spring",
+        center_address="the subject",
+        radius_miles=0.5,
+        center=(30.0362, -95.3424),
+    )
+
+    assert [s.listing.listing_id for s in result.scored] == ["subject"]
+    assert result.valuations["subject"].comp_count == 2
+
+
+def make_active(listing_id, lat, lon, **kw):
+    base = dict(
+        listing_id=listing_id,
+        address=f"{listing_id} Somewhere St",
+        city="Spring",
+        lat=lat,
+        lon=lon,
+        price=250_000,
+        beds=3,
+        baths_full=2,
+        sqft=1600,
+        property_type=PropertyType.SINGLE_FAMILY,
+    )
+    base.update(kw)
+    return Listing(**base)
+
+
+def test_a_listing_missing_from_a_refresh_stops_being_returned(tmp_path):
+    """A corpus that only ever adds is a corpus that lies.
+
+    Upserts never delete, so a house that sold and left the feed would sit in
+    the cache forever — returned as an active result and, worse, counted as an
+    asking comp against its neighbours. A refresh is therefore authoritative
+    about its own area: whatever it did not return is no longer for sale
+    there.
+    """
+    source, db = CorpusSource(), make_db(tmp_path)
+    first = run(source, db, area="Spring")
+    assert len(first.scored) == 2
+
+    source.for_sale = [row for row in source.for_sale if row["listingId"] != "F2"]
+    later = run(source, db, area="Spring", today=TODAY + timedelta(days=1))
+
+    assert "F2" not in [s.listing.listing_id for s in later.scored]
+    assert len(later.scored) == 1
+
+
+def test_limit_trims_the_ranked_list_not_the_fetch(tmp_path):
+    """`limit` used to cap the vendor fetch and the results at once. Now the
+    corpus is the whole area and `limit` only says how much of the ranking to
+    return — the two numbers came apart when the fetch stopped being per
+    search, and conflating them again would quietly shrink the comp pool."""
+    source, db = CorpusSource(), make_db(tmp_path)
+    result = run_search(
+        source=source,
+        db=db,
+        criteria=Criteria(area="Spring", max_price=250_000),
+        limit=1,
+        today=TODAY,
+    )
+    assert len(result.scored) == 1
+    assert source.corpus_calls == [("Spring", CORPUS_LIMIT)]

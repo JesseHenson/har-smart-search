@@ -240,3 +240,58 @@ def test_garage_attached_none_round_trips_as_none_not_false(tmp_path):
     listings = db.get_snapshot_listings(snapshot_id)
     assert listings[0].garage.attached is None
     assert listings[0].garage == GarageInfo(spaces=2, attached=None, tags=())
+
+
+def make_active(listing_id, lat, lon, **kw):
+    base = dict(
+        listing_id=listing_id,
+        address=f"{listing_id} Somewhere St",
+        city="Houston",
+        zip="77084",
+        lat=lat,
+        lon=lon,
+        price=250_000,
+        beds=3,
+        baths_full=2,
+        sqft=1600,
+        property_type=PropertyType.SINGLE_FAMILY,
+    )
+    base.update(kw)
+    return Listing(**base)
+
+
+BEAVERBROOK = (29.8536, -95.6393)
+
+
+def test_actives_come_back_by_distance_not_by_search(tmp_path):
+    """The corpus outlives the run that fetched it. A listing put in by one
+    search must be available as a comp to every later search that reaches it,
+    which is the whole point of pooling them."""
+    db = make_db(tmp_path)
+    db.upsert_actives(
+        [
+            make_active("near", 29.8600, -95.6400),
+            make_active("far", 29.9500, -95.4000),
+        ]
+    )
+    near = db.actives_near(BEAVERBROOK[0], BEAVERBROOK[1], miles=2.0)
+    assert [l.listing_id for l in near] == ["near"]
+
+
+def test_reupserting_a_listing_updates_it_rather_than_duplicating(tmp_path):
+    """Corpus rows are keyed on the listing, not the run. A price cut seen on
+    today's refresh must replace yesterday's price, not sit beside it."""
+    db = make_db(tmp_path)
+    db.upsert_actives([make_active("L1", *BEAVERBROOK, price=250_000)])
+    db.upsert_actives([make_active("L1", *BEAVERBROOK, price=239_000)])
+    found = db.actives_near(BEAVERBROOK[0], BEAVERBROOK[1], miles=1.0)
+    assert len(found) == 1
+    assert found[0].price == 239_000
+
+
+def test_corpus_freshness_is_recorded_per_area(tmp_path):
+    db = make_db(tmp_path)
+    assert db.corpus_fetched_on("77084") is None
+    db.record_corpus_fetch("77084", "2026-09-07")
+    assert db.corpus_fetched_on("77084") == "2026-09-07"
+    assert db.corpus_fetched_on("77449") is None

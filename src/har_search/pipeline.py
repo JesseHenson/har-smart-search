@@ -49,6 +49,24 @@ class SearchResult:
 # caller is told the search failed and the rows land in the database.
 SOLD_REFRESH_DAYS = 7
 
+# How many listings one area refresh pulls. The fetch is criteria-free, so
+# this is the whole neighbourhood rather than one question's answer, and it is
+# the only number that costs money — searches against a fresh corpus are free.
+CORPUS_LIMIT = 100
+
+# Active listings move in a way closed sales do not: price cuts, pendings and
+# withdrawals all land within a day, and every one of them changes an asking
+# estimate. A week would be indefensible here even though it is right for sold.
+CORPUS_REFRESH_DAYS = 1
+
+# How far out an active comp may sit. Matches the `active` tier in comps.
+ACTIVE_COMP_RADIUS_MILES = 2.0
+
+# And how stale it may be. Wider than the refresh window so a comp is not
+# lost the moment its own area falls a day behind, but far short of the
+# sold lookback: an asking price nobody is asking any more is not evidence.
+ACTIVE_COMP_MAX_AGE_DAYS = 3
+
 
 def _area_centroid(listings: list[Listing]) -> tuple[float, float] | None:
     points = [(l.lat, l.lon) for l in listings if l.lat is not None and l.lon is not None]
@@ -58,6 +76,13 @@ def _area_centroid(listings: list[Listing]) -> tuple[float, float] | None:
         sum(p[0] for p in points) / len(points),
         sum(p[1] for p in points) / len(points),
     )
+
+
+def _corpus_is_stale(db, area: str, today: date) -> bool:
+    last = db.corpus_fetched_on(area)
+    if last is None:
+        return True
+    return (today - date.fromisoformat(last)).days >= CORPUS_REFRESH_DAYS
 
 
 def _sold_history_is_stale(db, area: str, today: date) -> bool:
@@ -106,14 +131,24 @@ def run_search(
         db.record_sold_fetch(criteria.area, today.isoformat())
 
     # 2. For-sale rows, normalized with every exclusion counted.
+    # The corpus refresh is criteria-free and area-wide, so it is worth caching
+    # hard: every search against a fresh one costs nothing and finishes
+    # instantly. Criteria are applied below, against everything known about the
+    # area rather than against whatever a narrowed fetch happened to return.
     exclusions: Counter[str] = Counter()
-    listings: list[Listing] = []
-    for raw in source.fetch_for_sale(criteria, limit):
-        result = normalize_listing(raw)
-        if result.listing is None:
-            exclusions[result.exclusion or "unknown"] += 1
-            continue
-        listings.append(result.listing)
+    if _corpus_is_stale(db, criteria.area, today):
+        fetched: list[Listing] = []
+        for raw in source.fetch_corpus(criteria.area, CORPUS_LIMIT):
+            result = normalize_listing(raw)
+            if result.listing is None:
+                exclusions[result.exclusion or "unknown"] += 1
+                continue
+            fetched.append(result.listing)
+        if fetched:
+            db.upsert_actives(fetched, seen_on=today.isoformat())
+            db.tag_corpus_area(criteria.area, [l.listing_id for l in fetched])
+        db.record_corpus_fetch(criteria.area, today.isoformat())
+    listings: list[Listing] = db.actives_in_area(criteria.area)
 
     # 3. Score. A listing failing a `must` parameter is removed, and counted.
     # A supplied center wins over the derived one. `_area_centroid` averages
@@ -131,12 +166,19 @@ def run_search(
             continue
         scored.append(result)
     scored.sort(key=lambda s: s.score, reverse=True)
+    # `limit` is now purely a presentation cap. It once bounded the vendor
+    # fetch as well; keeping the two joined would shrink the comp pool every
+    # time a caller asked for a shorter list.
+    scored = scored[:limit]
 
     # 4. Value each survivor against accumulated sold history.
     since = today - timedelta(days=COMP_LOOKBACK_DAYS)
     valuations: dict[str, Valuation] = {}
-    # Build the active comp pool once; comps_from_listings handles subject exclusion.
-    all_listings = [s.listing for s in scored]
+    # The active comp pool is the corpus around the subject, not this run's
+    # survivors. Drawing it from the survivors made the estimate circular: the
+    # caller's budget reached the pool, so a house was only ever compared
+    # against houses inside the budget it was being judged against, and the
+    # estimate could not see the market it claimed to measure.
     for item in scored:
         listing = item.listing
         sales = (
@@ -144,7 +186,17 @@ def run_search(
             if listing.lat is not None and listing.lon is not None
             else []
         )
-        valuations[listing.listing_id] = value_listing(listing, sales, all_listings, today)
+        actives = (
+            db.actives_near(
+                listing.lat,
+                listing.lon,
+                ACTIVE_COMP_RADIUS_MILES,
+                seen_since=(today - timedelta(days=ACTIVE_COMP_MAX_AGE_DAYS)).isoformat(),
+            )
+            if listing.lat is not None and listing.lon is not None
+            else []
+        )
+        valuations[listing.listing_id] = value_listing(listing, sales, actives, today)
 
     # 5. Persist.
     snapshot_id = db.create_snapshot(
