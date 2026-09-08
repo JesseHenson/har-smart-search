@@ -47,7 +47,56 @@ class Database:
     def init_schema(self) -> None:
         self._conn.executescript(SCHEMA_PATH.read_text())
         self._migrate()
+        self._adopt_snapshot_listings_into_corpus()
         self._conn.commit()
+
+    def _adopt_snapshot_listings_into_corpus(self) -> None:
+        """Seed the corpus from listings earlier snapshots already captured.
+
+        The corpus is only ever filled by a successful vendor fetch, so an
+        upgrade arriving at a database with a dry vendor account had plenty of
+        listings and no way to reach a single one of them. Every row in
+        `listings` is a listing we did fetch, once — enough to answer offline.
+
+        Rows are adopted with the run date of the snapshot that found them,
+        never today's. Stamping them fresh would suppress the next real
+        refresh for a day on data that may be months old, which is the same
+        lie in the other direction.
+        """
+        self._conn.execute(
+            "INSERT OR IGNORE INTO active_listings ("
+            " listing_id, mls_number, address, city, zip, subdivision, lat, lon,"
+            " price, price_per_sqft, beds, baths_full, baths_half, sqft, lot_sqft,"
+            " year_built, garage_spaces, garage_attached, garage_tags_json,"
+            " hoa_monthly, property_type, duplex_scope, status, days_on_market,"
+            " school_rating, tax_rate, appraisal_low, appraisal_high, url,"
+            " flags_json, first_seen, last_seen)"
+            " SELECT l.listing_id, l.mls_number, l.address, l.city, l.zip,"
+            " l.subdivision, l.lat, l.lon, l.price, l.price_per_sqft, l.beds,"
+            " l.baths_full, l.baths_half, l.sqft, l.lot_sqft, l.year_built,"
+            " l.garage_spaces, l.garage_attached, l.garage_tags_json,"
+            " l.hoa_monthly, l.property_type, l.duplex_scope, l.status,"
+            " l.days_on_market, l.school_rating, l.tax_rate, l.appraisal_low,"
+            " l.appraisal_high, l.url, l.flags_json,"
+            " date(s.run_at), date(s.run_at)"
+            " FROM listings l JOIN snapshots s ON s.id = l.snapshot_id"
+            " WHERE l.zip IS NOT NULL"
+            " GROUP BY l.listing_id"
+        )
+        # Tagged by the listing's own zip rather than the search that found
+        # it: the search may have named a city, a misspelling or a compound
+        # string that resolves to nothing, and the zip is where the house
+        # actually is.
+        self._conn.execute(
+            "INSERT OR IGNORE INTO corpus_areas (area, listing_id)"
+            " SELECT lower(zip), listing_id FROM active_listings"
+            " WHERE zip IS NOT NULL"
+        )
+        self._conn.execute(
+            "INSERT OR IGNORE INTO corpus_fetches (area, fetched_on)"
+            " SELECT lower(a.zip), max(a.last_seen) FROM active_listings a"
+            " WHERE a.zip IS NOT NULL GROUP BY lower(a.zip)"
+        )
 
     def _migrate(self) -> None:
         for table, column, decl in self._ADDED_COLUMNS:

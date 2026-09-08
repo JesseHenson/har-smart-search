@@ -295,3 +295,59 @@ def test_corpus_freshness_is_recorded_per_area(tmp_path):
     db.record_corpus_fetch("77084", "2026-09-07")
     assert db.corpus_fetched_on("77084") == "2026-09-07"
     assert db.corpus_fetched_on("77449") is None
+
+
+def test_existing_snapshot_listings_are_adopted_into_the_corpus(tmp_path):
+    """0.6.0 reads a corpus that only a successful fetch could fill, so an
+    upgrade with a dry vendor account had a database full of listings and no
+    way to reach any of them. Every listing a snapshot ever captured is
+    already a listing we fetched; the corpus should start from them."""
+    path = tmp_path / "legacy.db"
+    db = Database(path)
+    db.init_schema()
+    snapshot_id = db.create_snapshot(
+        saved_search="77084 #abc",
+        source="apify_memo23",
+        item_count=1,
+        excluded_count=0,
+        exclusions={},
+        sold_exclusions={},
+    )
+    listing = make_active("legacy-1", 29.8600, -95.6400, zip="77084")
+    db.insert_scored(snapshot_id, [ScoredListing(listing, 0.9, 1.0, [], "why")], {})
+    db._conn.execute("DELETE FROM active_listings")
+    db._conn.execute("DELETE FROM corpus_areas")
+    db._conn.commit()
+
+    Database(path).init_schema()
+
+    adopted = Database(path).actives_in_area("77084")
+    assert [l.listing_id for l in adopted] == ["legacy-1"]
+
+
+def test_adoption_does_not_claim_the_area_was_just_refreshed(tmp_path):
+    """Backfilled rows are as old as they are. Stamping them with today's date
+    would suppress the next real refresh for a full day on data that could be
+    months stale."""
+    path = tmp_path / "legacy2.db"
+    db = Database(path)
+    db.init_schema()
+    snapshot_id = db.create_snapshot(
+        saved_search="77084 #abc", source="apify_memo23", item_count=1,
+        excluded_count=0, exclusions={}, sold_exclusions={},
+    )
+    db.insert_scored(
+        snapshot_id,
+        [ScoredListing(make_active("legacy-1", 29.86, -95.64, zip="77084"), 0.9, 1.0, [], "w")],
+        {},
+    )
+    db._conn.execute("DELETE FROM active_listings")
+    db._conn.execute(
+        "UPDATE snapshots SET run_at = ? WHERE id = ?",
+        ("2026-03-01T09:00:00", snapshot_id),
+    )
+    db._conn.commit()
+
+    fresh = Database(path)
+    fresh.init_schema()
+    assert fresh.corpus_fetched_on("77084") == "2026-03-01"

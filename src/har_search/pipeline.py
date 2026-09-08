@@ -45,6 +45,11 @@ class SearchResult:
     # the area asked for, and the caller cannot tell without these.
     areas_searched: list[str] = field(default_factory=list)
     area_of: dict[str, str] = field(default_factory=dict)
+    # Set when a refresh was wanted and the vendor refused. The results are
+    # still real; they are just as old as the cache is.
+    vendor_unavailable: bool = False
+    # Set when the caller asked to stay off the vendor entirely.
+    offline: bool = False
 
 
 # How long a fetched sold history stays good. Closed sales arrive in a
@@ -107,12 +112,27 @@ def _sold_history_is_stale(db, area: str, today: date) -> bool:
     return (today - date.fromisoformat(last)).days >= SOLD_REFRESH_DAYS
 
 
-def _refresh_corpus(source, db, area: str, today: date, exclusions: Counter) -> None:
-    """Pull one area into the corpus if its cache has gone stale."""
+def _refresh_corpus(source, db, area: str, today: date, exclusions: Counter) -> bool:
+    """Pull one area into the corpus if its cache has gone stale.
+
+    Returns True when the vendor was wanted and refused. A refusal is not an
+    error to propagate: an account out of credit or a revoked token does not
+    make the listings already in the database wrong, and throwing would lose
+    an answer that is still worth giving. The failure is reported alongside
+    the results instead, so the caller knows the data is as old as the cache.
+
+    A failed refresh is deliberately not recorded. Marking it would cache the
+    failure for a whole day and make the next search skip a vendor that may
+    have come back.
+    """
     if not _corpus_is_stale(db, area, today):
-        return
+        return False
+    try:
+        raw_rows = list(source.fetch_corpus(area, CORPUS_LIMIT))
+    except Exception:
+        return True
     fetched: list[Listing] = []
-    for raw in source.fetch_corpus(area, CORPUS_LIMIT):
+    for raw in raw_rows:
         result = normalize_listing(raw)
         if result.listing is None:
             exclusions[result.exclusion or "unknown"] += 1
@@ -122,6 +142,7 @@ def _refresh_corpus(source, db, area: str, today: date, exclusions: Counter) -> 
         db.upsert_actives(fetched, seen_on=today.isoformat())
         db.tag_corpus_area(area, [l.listing_id for l in fetched])
     db.record_corpus_fetch(area, today.isoformat())
+    return False
 
 
 def run_search(
@@ -135,6 +156,7 @@ def run_search(
     city: str | None = None,
     max_neighbours: int = MAX_NEIGHBOUR_ZIPS,
     target_results: int = TARGET_RESULTS,
+    offline: bool = False,
 ) -> SearchResult:
     today = today or date.today()
     # Snapshots are keyed on the criteria, not the area. Keying on the area
@@ -151,8 +173,14 @@ def run_search(
     # 1. Sold history first, so comps are available for this run's listings.
     sold_exclusions: Counter[str] = Counter()
     sales: list = []
-    if _sold_history_is_stale(db, criteria.area, today):
-        for raw in source.fetch_sold(area=criteria.area):
+    vendor_unavailable = False
+    if not offline and _sold_history_is_stale(db, criteria.area, today):
+        try:
+            sold_rows = list(source.fetch_sold(area=criteria.area))
+        except Exception:
+            sold_rows = None
+            vendor_unavailable = True
+        for raw in sold_rows or []:
             result = normalize_sale(raw)
             if result.sale is None:
                 sold_exclusions[result.exclusion or "unknown"] += 1
@@ -163,7 +191,8 @@ def run_search(
         # Recorded even when the fetch returned nothing usable. An area with no
         # published sales would otherwise re-run the same empty leg on every
         # search, paying full latency for a result already known.
-        db.record_sold_fetch(criteria.area, today.isoformat())
+        if sold_rows is not None:
+            db.record_sold_fetch(criteria.area, today.isoformat())
 
     # 2. Walk outward until an area answers.
     # The ladder is the comps tiers applied to places: the area asked for,
@@ -186,7 +215,8 @@ def run_search(
 
     for index, area in enumerate(plan):
         areas_searched.append(area)
-        _refresh_corpus(source, db, area, today, exclusions)
+        if not offline and _refresh_corpus(source, db, area, today, exclusions):
+            vendor_unavailable = True
         listings = [
             listing
             for listing in db.actives_in_area(area)
@@ -272,4 +302,6 @@ def run_search(
         dropped_by_must=dropped_by_must,
         areas_searched=areas_searched,
         area_of=area_of,
+        vendor_unavailable=vendor_unavailable,
+        offline=offline,
     )

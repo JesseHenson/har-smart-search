@@ -494,3 +494,63 @@ def test_an_exhausted_ladder_reports_what_it_tried(tmp_path):
     )
     assert result.scored == []
     assert result.areas_searched == ["77084", "77041", "77095", "Houston"]
+
+
+class BrokenSource(CountingSource):
+    """The vendor refusing us, which is what a 403 looks like from here."""
+
+    def fetch_corpus(self, area, limit):
+        self.corpus_calls.append((area, limit))
+        raise RuntimeError("403 Forbidden")
+
+    def fetch_sold(self, area, agent_depth=25, limit=200):
+        self.sold_calls.append(area)
+        raise RuntimeError("403 Forbidden")
+
+
+def test_a_vendor_failure_still_answers_from_the_cache(tmp_path):
+    """Something beats nothing.
+
+    An account out of credit, a revoked token, an actor that went away — none
+    of those make the listings already in the database wrong. Throwing loses
+    an answer we can still give, and gives the caller nothing to act on.
+    """
+    db = make_db(tmp_path)
+    db.upsert_actives([make_active("cached", 30.0362, -95.3424)], seen_on=TODAY.isoformat())
+    db.tag_corpus_area("Spring", ["cached"])
+    db.record_corpus_fetch("Spring", (TODAY - timedelta(days=30)).isoformat())
+
+    result = run(BrokenSource(), db, area="Spring")
+
+    assert [s.listing.listing_id for s in result.scored] == ["cached"]
+    assert result.vendor_unavailable
+
+
+def test_a_vendor_failure_with_nothing_cached_is_still_not_a_crash(tmp_path):
+    result = run(BrokenSource(), db=make_db(tmp_path), area="Spring")
+    assert result.scored == []
+    assert result.vendor_unavailable
+
+
+def test_a_failed_refresh_is_not_recorded_as_a_refresh(tmp_path):
+    """Marking a failed fetch fresh would cache the failure for a day."""
+    db = make_db(tmp_path)
+    run(BrokenSource(), db, area="Spring")
+    assert db.corpus_fetched_on("Spring") is None
+
+
+def test_offline_never_reaches_the_vendor_at_all(tmp_path):
+    """A caller who knows the account is dry should be able to say so and get
+    whatever the cache holds, without a doomed round trip first."""
+    db = make_db(tmp_path)
+    db.upsert_actives([make_active("cached", 30.0362, -95.3424)], seen_on=TODAY.isoformat())
+    db.tag_corpus_area("Spring", ["cached"])
+    db.record_corpus_fetch("Spring", (TODAY - timedelta(days=30)).isoformat())
+
+    source = BrokenSource()
+    result = run_search(
+        source=source, db=db, criteria=Criteria(area="Spring", max_price=250_000),
+        limit=25, today=TODAY, offline=True,
+    )
+    assert source.corpus_calls == [] and source.sold_calls == []
+    assert [s.listing.listing_id for s in result.scored] == ["cached"]

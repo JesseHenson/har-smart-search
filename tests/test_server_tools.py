@@ -296,3 +296,38 @@ def test_no_matches_says_how_far_it_looked():
     assert payload["coverage"] == (
         "No matches. Searched 77084, then 77041, 77095, then Houston."
     )
+
+
+def test_stale_cached_results_say_so():
+    """A reader given results has to know the vendor was unreachable, or they
+    will read a month-old cache as today's market."""
+    base = make_result()
+    result = result_with(base.scored, ["77084"], {"L1": "77084"})
+    result.vendor_unavailable = True
+    payload = build_search_response(result, 25, dashboard_url="x")
+    assert payload["coverage"] == (
+        "Could not reach the listing source, so these come from the local "
+        "cache and may be out of date."
+    )
+
+
+def test_no_matches_and_no_vendor_says_both():
+    result = result_with([], ["77084", "77041"])
+    result.vendor_unavailable = True
+    payload = build_search_response(result, 25, dashboard_url="x")
+    assert payload["coverage"] == (
+        "No matches, and the listing source could not be reached — the local "
+        "cache holds nothing for 77084, then 77041."
+    )
+
+
+def test_an_offline_search_says_it_only_looked_at_the_cache():
+    """Asked for deliberately, but the reader still has to know the market was
+    never consulted — silence here reads as 'these are current'."""
+    base = make_result()
+    result = result_with(base.scored, ["77084"], {"L1": "77084"})
+    result.offline = True
+    payload = build_search_response(result, 25, dashboard_url="x")
+    assert payload["coverage"] == (
+        "Searched the local cache only; the listing source was not contacted."
+    )

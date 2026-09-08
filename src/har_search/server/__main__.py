@@ -62,7 +62,12 @@ def _change_row(change: ListingChange) -> dict:
     }
 
 
-def coverage_note(areas_searched: list[str], found_any: bool) -> str | None:
+def coverage_note(
+    areas_searched: list[str],
+    found_any: bool,
+    vendor_unavailable: bool = False,
+    offline: bool = False,
+) -> str | None:
     """One line about how far the search had to go, or nothing.
 
     Silent when the area asked for answered, which is the common case — a line
@@ -73,6 +78,25 @@ def coverage_note(areas_searched: list[str], found_any: bool) -> str | None:
     if not areas_searched:
         return None
     first, *widened = areas_searched
+    if offline:
+        # Deliberate, but silence would read as "these are current".
+        return (
+            "Searched the local cache only; the listing source was not "
+            "contacted."
+        )
+    if vendor_unavailable:
+        # This outranks the widening note. How far the ladder walked matters
+        # less than the fact that none of it was re-read from the source.
+        if not found_any:
+            searched = ", then ".join(areas_searched)
+            return (
+                "No matches, and the listing source could not be reached — the "
+                f"local cache holds nothing for {searched}."
+            )
+        return (
+            "Could not reach the listing source, so these come from the local "
+            "cache and may be out of date."
+        )
     if not found_any:
         tail = f", then {', '.join(widened)}" if widened else ""
         # The last rung is the city, and reads better set apart from the zips.
@@ -129,7 +153,12 @@ def build_search_response(
                 "delta_pct": valuation.delta_pct if valuation else None,
             }
         )
-    note = coverage_note(result.areas_searched, found_any=bool(result.scored))
+    note = coverage_note(
+        result.areas_searched,
+        found_any=bool(result.scored),
+        vendor_unavailable=result.vendor_unavailable,
+        offline=result.offline,
+    )
     return {
         "snapshot_id": result.snapshot_id,
         "saved_search": result.saved_search,
@@ -232,6 +261,7 @@ def search(
     max_age_years: int | None = None,
     center_address: str | None = None,
     radius_miles: float | None = None,
+    offline: bool = False,
     limit: int = 25,
 ) -> dict:
     """Search HAR listings by loose criteria and rank them by similarity.
@@ -257,6 +287,11 @@ def search(
     dropped outright rather than ranked low, and a matching city or
     subdivision name does not buy its way back in. An address that cannot be
     geocoded is an error, not a fallback to an area search.
+
+    When the listing source cannot be reached, the search answers from the
+    local cache rather than failing, and says so. Pass `offline=True` to
+    skip the source deliberately and search only what is already cached —
+    useful when the account behind it is out of credit.
 
     The response carries a `saved_search` key. Pass that same key to
     `whats_new` to compare this search against its own previous run.
@@ -286,6 +321,7 @@ def search(
         limit=limit,
         center=None if place is None else (place.lat, place.lon),
         city=None if place is None else place.city,
+        offline=offline,
     )
     base = ensure_dashboard_running(config.dashboard_port())
     return build_search_response(
