@@ -24,6 +24,18 @@
         "/Users/jessehenson/Development/HAR Real Estate Work/.claude/worktrees/new-branch-668df2/prototype"
       ],
       "port": 8901
+    },
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "/Users/jessehenson/Development/HAR Real Estate Work",
+        "python",
+        "/Users/jessehenson/Development/HAR Real Estate Work/scripts/dashboard_dev.py"
+      ],
+      "port": 8912
     }
   ]
 }

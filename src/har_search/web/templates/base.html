@@ -1,23 +1,152 @@
 <!doctype html>
 <title>{% block title %}HAR Smart Search{% endblock %}</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 24px; }
-  h1, h2 { margin: 0 0 6px; }
-  /* The criteria line answers "what did I ask for?" and sits directly
-     under the title, above the run metadata, because it describes the
-     search rather than this particular execution of it. */
-  .criteria { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #8883; }
-  th { font-weight: 600; font-size: 12px; text-transform: uppercase; opacity: .7; }
-  .chip { padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
-  .good { background: #16a34a22; color: #16a34a; }
-  .bad { background: #dc262622; color: #dc2626; }
-  .neutral { background: #8881; opacity: .8; }
-  .bar { height: 6px; background: #8883; border-radius: 3px; width: 90px; }
-  .bar > span { display: block; height: 100%; background: #2563eb; border-radius: 3px; }
-  .muted { opacity: .65; font-size: 12px; }
-  a { color: inherit; }
+  /* Modulaa product-app theme. Class names are the contract between this
+     stylesheet and the templates: .criteria .muted .bar .chip .good .bad
+     .neutral, plus the bare elements. Changing a class here means changing
+     it in run.html, listing.html, diff.html and index.html too. */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+
+:root {
+  color-scheme: light;
+  --ai-primary:       #00D4AA;
+  --ai-primary-dark:  #008C74;
+  --ai-primary-pale:  rgba(0,212,170,0.15);
+  --ai-rail:          #0D1B2A;
+  --ai-canvas:        #F4F6F8;
+  --ai-card:          #FFFFFF;
+  --ai-text:          #0D1B2A;
+  --ai-muted:         #6B7E91;
+  --ai-faint:         #9AB0C4;
+  --ai-border:        rgba(13,27,42,0.10);
+  --ai-success:       #008C74;
+  --ai-success-pale:  rgba(0,212,170,0.12);
+  --ai-critical:      #C3304B;
+  --ai-critical-pale: #FAEEF0;
+  --ai-table-header:  #F4F6F8;
+  --gradient-signature: linear-gradient(135deg, #0D1B2A, #00D4AA);
+  --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-heading: 'Space Grotesk', var(--font-primary);
+  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+  --radius-sm: 4px; --radius: 4px; --radius-lg: 8px; --radius-pill: 9999px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0; padding: 0;
+  font-family: var(--font-primary); font-size: 0.875rem; line-height: 1.6;
+  color: var(--ai-text); background: var(--ai-canvas);
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible { outline: 3px solid var(--ai-primary); outline-offset: 2px; border-radius: 3px; }
+a { color: var(--ai-primary-dark); font-weight: 600; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Page header band — signature gradient, like the DLS page header ──
+   The band is painted once behind the h1 + .criteria pair via body::before,
+   so both elements sit on one continuous gradient without markup changes. */
+body { position: relative; }
+body::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 176px;
+  background: var(--gradient-signature); overflow: hidden; z-index: 0;
+}
+body::after {
+  content: ""; position: absolute; right: -60px; top: -60px; width: 280px; height: 280px;
+  border-radius: 50%; background: rgba(255,255,255,0.05); z-index: 0; pointer-events: none;
+}
+body > * { position: relative; z-index: 1; }
+
+h1 {
+  font-family: var(--font-heading); font-size: 2rem; font-weight: 700; letter-spacing: -0.03em;
+  line-height: 1.15; color: #fff; margin: 0;
+  padding: 44px 48px 10px;
+}
+
+/* Criteria line lives inside the band: it describes the search, not the run */
+.criteria {
+  margin: 0; padding: 0 48px 0; min-height: 60px;
+  color: rgba(255,255,255,0.78); font-size: 0.875rem; font-weight: 400;
+}
+
+/* Run metadata — mono, muted, sits below the band */
+.muted {
+  font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.02em;
+  color: var(--ai-muted); opacity: 1;
+  margin: 0; padding: 24px 48px 12px;
+}
+
+/* ── Results table — .ai-table pattern ── */
+table {
+  width: calc(100% - 96px); margin: 0 48px 40px;
+  border-collapse: separate; border-spacing: 0;
+  background: var(--ai-card); border: 1px solid var(--ai-border);
+  border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
+}
+th {
+  text-align: left; padding: 11px 16px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--ai-muted); background: var(--ai-table-header);
+  border-bottom: 1px solid var(--ai-border); opacity: 1;
+}
+td {
+  padding: 12px 16px; border-bottom: 1px solid var(--ai-border);
+  color: var(--ai-text); vertical-align: middle;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--ai-primary-pale); }
+td a { color: var(--ai-text); font-weight: 600; }
+td a:hover { color: var(--ai-primary-dark); }
+td .muted { padding: 0; font-family: var(--font-primary); font-size: 0.75rem; }
+/* numeric columns in mono */
+td:nth-child(2), td:nth-child(3), td:nth-child(4), td:nth-child(8) { font-family: var(--font-mono); font-size: 0.8125rem; }
+
+/* ── Match bar ── */
+.bar { height: 6px; width: 90px; background: rgba(13,27,42,0.10); border-radius: var(--radius-pill); }
+.bar > span { display: block; height: 100%; background: var(--ai-primary); border-radius: var(--radius-pill); }
+.bar + .muted, .bar ~ span { font-family: var(--font-mono); }
+
+/* ── Value chips — .ai-tag pattern ── */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: var(--radius-pill);
+  font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+}
+.good    { background: var(--ai-success-pale);  color: var(--ai-success); }
+.bad     { background: var(--ai-critical-pale); color: var(--ai-critical); border: 1px solid rgba(195,48,75,0.2); }
+.neutral { background: var(--ai-canvas); color: var(--ai-muted); border: 1px solid var(--ai-border); opacity: 1; }
+
+/* ── Section header (Data quality) — .sb-section-header ── */
+h2 {
+  font-family: var(--font-heading); font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em;
+  margin: 0 48px 12px; padding-bottom: 12px; border-bottom: 2px solid var(--ai-border);
+}
+h2 + p, h2 ~ p { margin: 0 48px 10px; color: var(--ai-muted); font-size: 0.875rem; line-height: 1.75; }
+/* Prose that never reaches an h2 — the diff page's "only one run so far"
+   — still needs the page gutter. `.muted` is excluded because it carries
+   its own padding and would end up indented twice. */
+body > p:not(.muted) { margin: 0 48px 10px; }
+body > p:last-child { padding-bottom: 48px; }
+
+/* The band is sized for the two-line header on the results page. Every
+   other page — the index, a listing, a diff — has a title and no criteria
+   line, so the band shrinks to fit rather than running under the content
+   that follows. */
+body:not(:has(> .criteria))::before { height: 104px; }
+body:not(:has(> .criteria)) h1 { padding-bottom: 28px; }
+h1 + table, h1 + .muted + table { margin-top: 20px; }
+/* A page whose header is followed straight by prose still clears the band. */
+body:not(:has(> .criteria)) > h2:first-of-type { margin-top: 28px; }
+
+@media (max-width: 860px) {
+  body::before { height: 168px; }
+  body:not(:has(> .criteria))::before { height: 96px; }
+  h1 { padding: 32px 20px 8px; font-size: 1.5rem; }
+  .criteria { padding: 0 20px; min-height: 64px; }
+  .muted { padding: 20px 20px 10px; }
+  table { width: calc(100% - 40px); margin: 0 20px 32px; display: block; overflow-x: auto; }
+  h2, h2 ~ p, body > p:not(.muted) { margin-left: 20px; margin-right: 20px; }
+}
 </style>
 <body>{% block body %}{% endblock %}</body>
