@@ -67,10 +67,14 @@ class ApifyMemo23Source:
         self._http = http
 
     def _run(self, payload: dict) -> list[dict]:
+        # The token goes in a header, never the query string. Apify accepts
+        # both, but a URL is the one part of a request that everything logs:
+        # ours was written in full into the desktop app's MCP log seven times
+        # by a run of 403s, inside the traceback, in plaintext.
         response = self._http.post(
             self._run_sync_url,
             json=payload,
-            params={"token": self._token},
+            headers={"Authorization": f"Bearer {self._token}"},
             timeout=self._timeout,
         )
         response.raise_for_status()

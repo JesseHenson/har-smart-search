@@ -1,39 +1,41 @@
-"""Where the bundle's vendored dependencies live for this interpreter.
+"""Where the bundle's vendored dependencies live.
 
-The bundle ships compiled wheels — `pydantic_core`, `_cffi_backend` — whose
-`.so` files are built against one CPython ABI. Which interpreter runs us is
-not our choice: Claude Desktop resolves it from PATH, and that has already
-produced a 3.14 on one machine and refused to start on another because a
-pyenv shim shadowed `python`. So the bundle carries one directory per
-supported ABI and picks at import time, before anything is imported from
-them.
+The bundle ships its own CPython, so the ABI is no longer the host's to
+choose and the fan-out that used to exist here — one directory per supported
+CPython version, picked at import time — has collapsed to one directory named
+for the platform. `launch.sh` sets PYTHONPATH to the same place; this module
+is what keeps the entry point working when it is run directly.
+
+The old per-ABI directories are still offered afterwards so a bundle unpacked
+from an earlier build imports rather than exploding.
 """
 
 from __future__ import annotations
 
 import sys
 
-# Kept in step with `compatibility.runtimes.python` in manifest.json and with
-# what BUNDLE.md vendors. Adding a version here without vendoring for it just
-# yields a directory that does not exist, which is skipped harmlessly.
-SUPPORTED = ((3, 12), (3, 13), (3, 14))
+LEGACY_ABIS = ((3, 12), (3, 13), (3, 14))
+
+
+def current_platform() -> str:
+    machine = "arm64" if sys.platform == "darwin" else "x86_64"
+    return f"{sys.platform}-{machine}"
 
 
 def vendored_lib_dirs(
-    bundle_root: str, version: tuple[int, int] | None = None
+    bundle_root: str,
+    platform: str | None = None,
+    version: tuple[int, int] | None = None,
 ) -> list[str]:
-    """Candidate dependency directories, most specific first.
-
-    The exact-ABI directory leads. Other supported ABIs follow, because pure
-    Python packages import fine from any of them and a near-miss fails on the
-    one binary it actually needs rather than on the first import. The flat
-    `lib/` trails as a fallback so bundles built before this layout still run.
-    """
+    """Candidate dependency directories, most specific first."""
+    platform = platform or current_platform()
     if version is None:
         version = (sys.version_info.major, sys.version_info.minor)
 
-    ordered = [version] + [v for v in SUPPORTED if v != version]
     root = bundle_root.rstrip("/")
-    return [f"{root}/lib/py{major}{minor}" for major, minor in ordered] + [
-        f"{root}/lib"
-    ]
+    ordered = [version] + [v for v in LEGACY_ABIS if v != version]
+    return (
+        [f"{root}/lib/{platform}"]
+        + [f"{root}/lib/py{major}{minor}" for major, minor in ordered]
+        + [f"{root}/lib"]
+    )

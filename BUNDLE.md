@@ -4,25 +4,46 @@
 
     cd "/Users/jessehenson/Development/HAR Real Estate Work"
     uv sync
-    for v in 3.12 3.13 3.14; do
-      uv pip install --target "lib/py${v/./}" --python "$v" \
-        -r <(uv export --no-hashes --no-dev)
-    done
+
+    # The interpreter. Apple Silicon only — see below.
+    mkdir -p runtime && cd runtime
+    curl -sLO https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15+20260901-aarch64-apple-darwin-install_only.tar.gz
+    mkdir -p darwin-arm64
+    tar xzf cpython-3.13.15+20260901-aarch64-apple-darwin-install_only.tar.gz \
+      -C darwin-arm64 --strip-components=1
+    rm cpython-*.tar.gz
+    find darwin-arm64 -type d \( -name test -o -name tests -o -name idlelib \
+      -o -name tkinter -o -name turtledemo \) -exec rm -rf {} +
+    rm -rf darwin-arm64/include darwin-arm64/lib/python3.13/config-*
+    cd ..
+
+    # Dependencies, once, for the interpreter above.
+    rm -rf lib && mkdir -p lib/darwin-arm64
+    uv pip install --target lib/darwin-arm64 \
+      --python-platform aarch64-apple-darwin --python-version 3.13 \
+      -r <(uv export --no-hashes --no-dev)
     rm -f lib/*/*.pth && rm -rf lib/*/bin
+
     npx @anthropic-ai/mcpb pack
 
-Dependencies are vendored once per supported CPython ABI, because the
-compiled wheels (`pydantic_core`, `_cffi_backend`) only load on the
-version they were built for — and the host interpreter is not ours to
-choose. Claude Desktop resolves it from PATH. `server/libdir.py` picks
-the matching directory at startup, before any third-party import.
+The bundle ships its own CPython. Claude Desktop used to resolve `python3`
+from PATH, which is not ours to choose: it produced a 3.14 on one machine, a
+pyenv shim on another, and on a clean Mac nothing at all, since the system
+`python3` is a stub that only offers to install Xcode. Carrying the
+interpreter also collapses the dependency fan-out — one ABI to serve instead
+of three — so the bundle got simpler and barely larger.
 
-Adding a Python version means vendoring for it, listing it in
-`libdir.SUPPORTED`, and widening `compatibility.runtimes.python`.
+`bin/launch.sh` is the entry point, run as `sh launch.sh` so it does not
+depend on its own execute bit surviving the archive. The interpreter's execute
+bit does, which is worth checking after any change to how the bundle is
+packed.
 
-`pack` names the output after the directory it runs in, not after the
-manifest — rename the result to `har-smart-search-<version>.mcpb` before
-handing it to anyone.
+**Apple Silicon only, and not by choice.** `cryptography`, pulled in by the
+MCP SDK through `pyjwt[crypto]`, stopped publishing x86_64 macOS wheels as of
+50.0.1 — the only macOS wheels it ships are `macosx_11_0_arm64`. Supporting
+Intel would mean building it from source with a Rust toolchain on the user's
+machine, which is not something a bundle can promise. Revisit if that upstream
+decision changes, or if the SDK stops pulling the `crypto` extra.
 
 Verify the build before shipping it. Unzip it somewhere else and import
 the server with only the bundle on the path:

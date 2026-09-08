@@ -19,9 +19,15 @@ if _SRC not in sys.path:
 
 from har_search.server.libdir import vendored_lib_dirs  # noqa: E402
 
-for _candidate in reversed(vendored_lib_dirs(os.path.dirname(_SRC))):
+# Appended, not prepended. The bundle's own interpreter has no site-packages
+# of its own, so order costs it nothing there — while in a checkout, where the
+# vendored tree may be built for a different Python than the one running the
+# tests, prepending it shadows the working environment with wheels whose .so
+# files will not load. These are a fallback for a bundle run directly, and a
+# fallback should never win over something that already imports.
+for _candidate in vendored_lib_dirs(os.path.dirname(_SRC)):
     if os.path.isdir(_candidate) and _candidate not in sys.path:
-        sys.path.insert(0, _candidate)
+        sys.path.append(_candidate)
 
 from datetime import date  # noqa: E402
 

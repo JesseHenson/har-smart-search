@@ -13,8 +13,10 @@ class StubHttp:
         self.rows = rows
         self.calls = []
 
-    def post(self, url, json=None, params=None, timeout=None):
-        self.calls.append({"url": url, "json": json, "params": params})
+    def post(self, url, json=None, params=None, timeout=None, headers=None):
+        self.calls.append(
+            {"url": url, "json": json, "params": params, "headers": headers}
+        )
         return StubResponse(self.rows)
 
 
@@ -38,13 +40,24 @@ def test_fetch_corpus_returns_raw_rows():
     assert result[0]["address"] == "5519 Lynngate Dr"
 
 
-def test_fetch_corpus_sends_the_token_and_actor_path():
+def test_fetch_corpus_sends_the_actor_path():
+    http = StubHttp([])
+    source = ApifyMemo23Source(token="tok", http=http)
+    source.fetch_corpus(area="Spring", limit=5)
+    assert "memo23~har-scraper" in http.calls[0]["url"]
+
+
+def test_the_token_travels_in_a_header_and_never_in_the_url():
+    """A token in the query string ends up in every log line and traceback
+    that records the URL. Ours was written seven times into the desktop app's
+    MCP log by a run of 403s before anyone noticed."""
     http = StubHttp([])
     source = ApifyMemo23Source(token="tok", http=http)
     source.fetch_corpus(area="Spring", limit=5)
     call = http.calls[0]
-    assert "memo23~har-scraper" in call["url"]
-    assert call["params"]["token"] == "tok"
+    assert call["headers"]["Authorization"] == "Bearer tok"
+    assert "tok" not in call["url"]
+    assert not (call["params"] or {})
 
 
 def test_fetch_corpus_honours_a_custom_actor():

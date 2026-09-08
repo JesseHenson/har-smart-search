@@ -9,3 +9,10 @@ lib/
 .superpowers/
 *.mcpb
 .impeccable/
+
+# The bundled interpreter and vendored wheels are build outputs, fetched by
+# BUNDLE.md rather than tracked. Together they are ~100MB of binaries that
+# would sit in every clone forever.
+runtime/
+lib/
+*.mcpb

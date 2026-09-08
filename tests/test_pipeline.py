@@ -554,3 +554,69 @@ def test_offline_never_reaches_the_vendor_at_all(tmp_path):
     )
     assert source.corpus_calls == [] and source.sold_calls == []
     assert [s.listing.listing_id for s in result.scored] == ["cached"]
+
+
+def test_a_stale_cache_that_can_answer_is_not_refetched(tmp_path):
+    """SQLite first, vendor only if it cannot answer.
+
+    Refreshing before reading meant a stale marker bought an actor run even
+    when the rows already in the database would have satisfied the search.
+    Staleness is a reason to refresh when the cache falls short, not a bill to
+    pay before looking.
+    """
+    db = make_db(tmp_path)
+    db.upsert_actives(
+        [make_active(f"cached-{n}", 30.0362 + n * 0.001, -95.3424) for n in range(5)],
+        seen_on=(TODAY - timedelta(days=30)).isoformat(),
+    )
+    db.tag_corpus_area("Spring", [f"cached-{n}" for n in range(5)])
+    db.record_corpus_fetch("Spring", (TODAY - timedelta(days=30)).isoformat())
+
+    source = CorpusSource()
+    result = run_search(
+        source=source, db=db, criteria=Criteria(area="Spring", max_price=250_000),
+        limit=25, today=TODAY, target_results=5,
+    )
+    assert source.corpus_calls == []
+    assert len(result.scored) == 5
+
+
+def test_a_stale_cache_that_falls_short_is_refetched(tmp_path):
+    """The other half: staleness still buys a refresh when the cache cannot
+    carry the search on its own."""
+    db = make_db(tmp_path)
+    db.upsert_actives(
+        [make_active("cached", 30.0362, -95.3424)],
+        seen_on=(TODAY - timedelta(days=30)).isoformat(),
+    )
+    db.tag_corpus_area("Spring", ["cached"])
+    db.record_corpus_fetch("Spring", (TODAY - timedelta(days=30)).isoformat())
+
+    source = CorpusSource()
+    run_search(
+        source=source, db=db, criteria=Criteria(area="Spring", max_price=250_000),
+        limit=25, today=TODAY, target_results=5,
+    )
+    assert source.corpus_calls == [("Spring", CORPUS_LIMIT)]
+
+
+def test_a_search_answered_from_cache_costs_nothing_at_all(tmp_path):
+    """Not one actor run. The sold leg is a second vendor call, and pairing it
+    with the corpus refresh is what makes a cached search genuinely free —
+    otherwise every search still bought one run no matter what the cache
+    held."""
+    db = make_db(tmp_path)
+    db.upsert_actives(
+        [make_active(f"cached-{n}", 30.0362 + n * 0.001, -95.3424) for n in range(5)],
+        seen_on=(TODAY - timedelta(days=30)).isoformat(),
+    )
+    db.tag_corpus_area("Spring", [f"cached-{n}" for n in range(5)])
+    db.record_corpus_fetch("Spring", (TODAY - timedelta(days=30)).isoformat())
+
+    source = CorpusSource()
+    run_search(
+        source=source, db=db, criteria=Criteria(area="Spring", max_price=250_000),
+        limit=25, today=TODAY, target_results=5,
+    )
+    assert source.corpus_calls == []
+    assert source.sold_calls == []

@@ -170,30 +170,6 @@ def run_search(
     # saved-search key is a hash of them and cannot be read backwards.
     db.record_saved_search(saved_search, criteria)
 
-    # 1. Sold history first, so comps are available for this run's listings.
-    sold_exclusions: Counter[str] = Counter()
-    sales: list = []
-    vendor_unavailable = False
-    if not offline and _sold_history_is_stale(db, criteria.area, today):
-        try:
-            sold_rows = list(source.fetch_sold(area=criteria.area))
-        except Exception:
-            sold_rows = None
-            vendor_unavailable = True
-        for raw in sold_rows or []:
-            result = normalize_sale(raw)
-            if result.sale is None:
-                sold_exclusions[result.exclusion or "unknown"] += 1
-                continue
-            sales.append(result.sale)
-        if sales:
-            db.upsert_sales(sales)
-        # Recorded even when the fetch returned nothing usable. An area with no
-        # published sales would otherwise re-run the same empty leg on every
-        # search, paying full latency for a result already known.
-        if sold_rows is not None:
-            db.record_sold_fetch(criteria.area, today.isoformat())
-
     # 2. Walk outward until an area answers.
     # The ladder is the comps tiers applied to places: the area asked for,
     # then its measured neighbours, then the city. A rung is only ever reached
@@ -209,19 +185,36 @@ def run_search(
     )
     centroid = center or None
     scored: list[ScoredListing] = []
+    sold_exclusions: Counter[str] = Counter()
+    sales: list = []
+    vendor_unavailable = False
+    corpus_refreshed = False
     area_of: dict[str, str] = {}
     areas_searched: list[str] = []
     dropped_by_must = 0
 
-    for index, area in enumerate(plan):
-        areas_searched.append(area)
-        if not offline and _refresh_corpus(source, db, area, today, exclusions):
-            vendor_unavailable = True
-        listings = [
+    def unseen(area: str) -> list[Listing]:
+        return [
             listing
             for listing in db.actives_in_area(area)
             if listing.listing_id not in area_of
         ]
+
+    for index, area in enumerate(plan):
+        areas_searched.append(area)
+        # Read before fetching. Staleness is a reason to refresh when the
+        # cache falls short, not a bill to pay before looking: refreshing
+        # first bought an actor run on every stale marker even when the rows
+        # already in the database would have answered. The vendor is the
+        # fallback, and with the ladder able to reach five areas in one
+        # search, the difference is five actor runs or none.
+        listings = unseen(area)
+        if not offline and len(scored) + len(listings) < target_results:
+            if _refresh_corpus(source, db, area, today, exclusions):
+                vendor_unavailable = True
+            else:
+                corpus_refreshed = True
+                listings = unseen(area)
         if index == 0:
             # The area asked for is the only rung the caller's center and
             # radius describe.
@@ -252,6 +245,36 @@ def run_search(
     # fetch as well; keeping the two joined would shrink the comp pool every
     # time a caller asked for a shorter list.
     scored = scored[:limit]
+
+
+    # 4a. Sold history, but only when listings were refreshed too.
+    # It is a second actor run, and pairing it with the corpus refresh is what
+    # makes a cached search genuinely free — refreshing it on its own schedule
+    # meant every search still bought one run no matter what the cache held.
+    # Comps are as fresh as the listings they price, which is the pairing a
+    # reader would assume anyway.
+    sold_exclusions: Counter[str] = Counter()
+    sales: list = []
+    if corpus_refreshed and not offline and _sold_history_is_stale(db, criteria.area, today):
+        try:
+            sold_rows = list(source.fetch_sold(area=criteria.area))
+        except Exception:
+            sold_rows = None
+            vendor_unavailable = True
+        for raw in sold_rows or []:
+            result = normalize_sale(raw)
+            if result.sale is None:
+                sold_exclusions[result.exclusion or "unknown"] += 1
+                continue
+            sales.append(result.sale)
+        if sales:
+            db.upsert_sales(sales)
+        # Recorded even when the fetch returned nothing usable. An area with no
+        # published sales would otherwise re-run the same empty leg on every
+        # search, paying full latency for a result already known.
+        if sold_rows is not None:
+            db.record_sold_fetch(criteria.area, today.isoformat())
+
 
     # 4. Value each survivor against accumulated sold history.
     since = today - timedelta(days=COMP_LOOKBACK_DAYS)
