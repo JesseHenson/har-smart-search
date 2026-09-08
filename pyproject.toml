@@ -1,6 +1,6 @@
 [project]
 name = "har-search"
-version = "0.8.0"
+version = "0.8.1"
 description = "Similarity search and comps valuation over HAR listings"
 requires-python = ">=3.11"
 dependencies = [
